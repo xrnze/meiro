@@ -49,14 +49,21 @@ type nowPlayingState struct {
 	queueSelectionAnchor int
 	queueSelectionCursor int
 	// queueFollow is the track the queue's list last scrolled to.
-	queueFollow  string
-	volumeHeld   bool
-	volumePopup  bool
-	lyrics       lyricsState
-	lyricsScroll ui.ScrollState
-	details      detailsState
-	related      relatedState
-	relatedList  ui.ListState
+	queueFollow string
+	// volumeHeld turns the drag or keyboard edits of the volume slider into
+	// the setting and its save; volumePopup keeps the narrow bar's volume
+	// panel open while the pointer is on it.
+	volumeHeld  bool
+	volumePopup bool
+	// volumeExpanded and scrubExpanded thicken the volume and position
+	// sliders while either is hovered, focused or held.
+	volumeExpanded bool
+	scrubExpanded  bool
+	lyrics         lyricsState
+	lyricsScroll   ui.ScrollState
+	details        detailsState
+	related        relatedState
+	relatedList    ui.ListState
 	// miniOpen is whether the tray's mini player shows. Its side panel then
 	// loads what its tab shows, as the full-screen player's does.
 	miniOpen bool

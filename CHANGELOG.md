@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **The player shows the volume as a number.** While the cursor is over or the focus is on the volume control, the current level reads, for example, 72, floated above it in the player bar and in the full-screen player. The narrow bar's volume panel shows it over its slider too.
+- **The position and volume sliders grow as you reach for them.** Hovering or tabbing to the scrubber or the volume slider thickens its track and its thumb, and they settle back when you move on.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Fixed

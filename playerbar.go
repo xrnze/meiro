@@ -10,6 +10,13 @@ import (
 	"github.com/elianiva/meiro/youtube"
 )
 
+// Slider tracks keep their resting thickness until the user hovers or focuses
+// them, then thicken, and their thumb with them, so they are easier to grab.
+const (
+	sliderThin  float32 = 4
+	sliderThick float32 = 12
+)
+
 // transport builds the controls that start, stop and move through the queue:
 // shuffle, previous, play or pause, next and repeat. The play button is a
 // circle that squares off while the music plays, so the state shows in its
@@ -82,9 +89,18 @@ func (a *app) scrubber(c *ui.Context) {
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		m3.Text(c, m3.LabelMedium, clock(time.Duration(a.scrub*float64(time.Second)))).
 			MinWidth(40).NoWrap().TextAlign(ui.End).Shrink(0).TextColor(sc.OnSurfaceVariant).FontFeatures("tnum")
+		thick := sliderThin
+		if a.nowPlaying.scrubExpanded {
+			thick = sliderThick
+		}
 		slider := m3.Slider(c, &a.scrub, 0, total, m3.SliderSpec{
-			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known,
+			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known, Thickness: thick,
 		})
+		expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+		if expanded != a.nowPlaying.scrubExpanded {
+			a.nowPlaying.scrubExpanded = expanded
+			c.Invalidate()
+		}
 		if slider.Pressed() {
 			a.scrubbing = true
 		}
@@ -124,7 +140,16 @@ func (a *app) muteButton(c *ui.Context) ui.Element {
 // vertical in the narrow bar's hover panel.
 func (a *app) volumeSlider(c *ui.Context, vertical bool) ui.Element {
 	v := a.volume
-	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical})
+	thick := sliderThin
+	if a.nowPlaying.volumeExpanded {
+		thick = sliderThick
+	}
+	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical, Thickness: thick})
+	expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+	if expanded != a.nowPlaying.volumeExpanded {
+		a.nowPlaying.volumeExpanded = expanded
+		c.Invalidate()
+	}
 	if slider.Changed() {
 		a.setVolume(v)
 	}
@@ -141,21 +166,33 @@ func (a *app) volumeSlider(c *ui.Context, vertical bool) ui.Element {
 	return slider
 }
 
+// volumeReadout floats the current volume, as a number, above the volume
+// control while it is hovered or focused, so a glance says how loud it is.
+func (a *app) volumeReadout(c *ui.Context, anchor ui.Element, show bool) {
+	sc := m3.Of(c).Scheme
+	open := show
+	ui.PopoverBase(c, anchor, &open, func(panel ui.Element) {
+		panel.Key("volume-readout").Padding(2, 7).Radius(m3.Small).Background(sc.SurfaceContainerHigh).
+			AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorBottomLeft).Margin(0, 0, 6, 0)
+		m3.Elevation(c, panel, 2)
+		m3.LabelMedium.Style(ui.Text(c, strconv.Itoa(int(a.volume))), false).TextColor(sc.OnSurface)
+	})
+}
+
 // volumeControl is the speaker button, which mutes, and the slider beside it.
 func (a *app) volumeControl(c *ui.Context, sliderWidth float32) {
 	a.nowPlaying.volumePopup = false
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-		a.hinted(c, func() {
-			a.muteButton(c)
-		}, keymap.Mute)
-		if sliderWidth <= 0 {
-			return
+		var anchor, slider ui.Element
+		a.hinted(c, func() { anchor = a.muteButton(c) }, keymap.Mute)
+		if sliderWidth > 0 {
+			a.hinted(c, func() {
+				ui.Row(c).Width(sliderWidth).Children(func() {
+					slider = a.volumeSlider(c, false)
+				})
+			}, keymap.VolumeUp, keymap.VolumeDown)
 		}
-		a.hinted(c, func() {
-			ui.Row(c).Width(sliderWidth).Children(func() {
-				a.volumeSlider(c, false)
-			})
-		}, keymap.VolumeUp, keymap.VolumeDown)
+		a.volumeReadout(c, anchor, anchor.Hovered() || anchor.FocusVisible() || slider.Hovered() || slider.FocusVisible())
 	})
 }
 
@@ -173,7 +210,8 @@ func (a *app) compactVolumeControl(c *ui.Context) {
 			panel.Key("volume-popup").Width(64).Padding(8).Radius(m3.Large).Margin(0).Background(sc.SurfaceContainerHigh)
 			m3.Elevation(c, panel, 3)
 			a.hinted(c, func() {
-				ui.Column(c).Width(48).Height(128).Center().Children(func() {
+				ui.Column(c).Width(48).Height(140).Gap(4).Center().Children(func() {
+					m3.LabelMedium.Style(ui.Text(c, strconv.Itoa(int(a.volume))), false).TextColor(sc.OnSurface)
 					slider = a.volumeSlider(c, true)
 				})
 			}, keymap.VolumeUp, keymap.VolumeDown)

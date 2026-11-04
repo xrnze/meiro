@@ -119,6 +119,80 @@ func TestMiniPlayerShowsAndControlsWhatPlays(t *testing.T) {
 	}
 }
 
+// The volume control floats the current volume above it as a number while
+// the user hovers the mute button or the slider, and only then.
+func TestVolumeReadoutShowsTheValueOnHover(t *testing.T) {
+	a := newTestApp(t)
+	a.volume = 72
+	tt := ui.NewTester(a.miniPlayer, miniWidth, miniHeight)
+	tt.Frame()
+	if tt.HasText("72") {
+		t.Fatalf("the volume shows before the control is hovered: %q", tt.Texts())
+	}
+	mute, ok := tt.Find("Mute")
+	if !ok {
+		t.Fatal("no mute button in the player")
+	}
+	tt.Move(mute.X+mute.W/2, mute.Y+mute.H/2)
+	tt.Frame()
+	if !tt.HasText("72") {
+		t.Fatalf("hovering the volume control did not show its value: %q", tt.Texts())
+	}
+	tt.Move(0, 0)
+	tt.Frame()
+	if tt.HasText("72") {
+		t.Fatalf("leaving the volume control kept its value up: %q", tt.Texts())
+	}
+}
+
+// The volume and position sliders grow a thicker track and thumb while the
+// user hovers them, and settle back when they leave.
+func TestSlidersThickenOnHover(t *testing.T) {
+	a, _ := playbackApp(t)
+	q := tracks("a")
+	for i := range q {
+		q[i].Duration = "0:50"
+	}
+	a.queue.restore(playstate.State{Items: q, Index: 0, RecStart: -1})
+	a.current, a.total, a.resumeID = q[0], 50*time.Second, "a"
+	tt := ui.NewTester(a.miniPlayer, miniWidth, miniHeight)
+	tt.Frame()
+	vol, ok := tt.Find("Volume")
+	if !ok {
+		t.Fatal("no volume slider in the player")
+	}
+	if a.nowPlaying.volumeExpanded {
+		t.Fatal("the volume slider starts thick")
+	}
+	tt.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
+	tt.Frame()
+	if !a.nowPlaying.volumeExpanded {
+		t.Fatalf("hovering the volume slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Move(0, 0)
+	tt.Frame()
+	if a.nowPlaying.volumeExpanded {
+		t.Fatal("leaving the volume slider kept it thick")
+	}
+	scrub, ok := tt.Find("Position")
+	if !ok {
+		t.Fatal("no position slider in the player")
+	}
+	if a.nowPlaying.scrubExpanded {
+		t.Fatal("the position slider starts thick")
+	}
+	tt.Move(scrub.X+scrub.W/2, scrub.Y+scrub.H/2)
+	tt.Frame()
+	if !a.nowPlaying.scrubExpanded {
+		t.Fatalf("hovering the position slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Move(0, 0)
+	tt.Frame()
+	if a.nowPlaying.scrubExpanded {
+		t.Fatal("leaving the position slider kept it thick")
+	}
+}
+
 // The mini player keeps the speed in its overflow menu, so no speed button
 // takes a place beside the volume slider.
 func TestMiniPlayerPicksThePlaybackSpeedFromItsOverflowMenu(t *testing.T) {
