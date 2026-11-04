@@ -332,19 +332,22 @@ func (a *app) playerBar(c *ui.Context) {
 	w, _ := c.Size()
 	wide := w > 1180
 	roomy := w > 800
-	bar := ui.Row(c.Key("player")).Absolute().Left(playerGutter).Right(playerGutter).Bottom(playerGutter).
-		Height(playerHeight).Padding(10, 20, 10, 12).Gap(16).AlignItems(ui.Center).
-		Radius(m3.ExtraLarge).Background(sc.SurfaceContainerHigh)
+	bar := ui.ButtonBase(c.Key("player")).Absolute().Left(playerGutter).Right(playerGutter).Bottom(playerGutter).
+		Height(playerHeight).Padding(10, 20, 10, 12).Gap(16).AlignItems(ui.Center).Justify(ui.Start).
+		Radius(m3.ExtraLarge).Cursor(ui.CursorPointer).Label("Open the full player")
+	bar.Background(m3.StateFill(sc.SurfaceContainerHigh, sc.OnSurface, false, false, bar.FocusVisible()))
 	m3.Elevation(c, bar, 3)
 	slide := m3.SpatialDefault.Motion()
 	slide.Enter = &ui.Motion{Y: 48}
 	slide.Position = true
 	bar.Transition(slide)
 	bar.Children(func() {
-		info := ui.ButtonBase(c.Key("player-info"))
-		info.Grow(1).Basis(0).MinWidth(0).Gap(14).AlignItems(ui.Center).Radius(m3.Large).Padding(0, 8, 0, 0).
-			Cursor(ui.CursorPointer).Label("Open the player").
-			Background(m3.StateFill(ui.Transparent, sc.OnSurface, info.Hovered(), info.Pressed(), info.FocusVisible()))
+		// The bar itself is the background press that opens the full player:
+		// it takes a press only where no child did first, so the sliders,
+		// the buttons and the artist and album links keep theirs, and the
+		// empty padding and the spaces between the sections open the player.
+		info := ui.Row(c.Key("player-info"))
+		info.Grow(1).Basis(0).MinWidth(0).Gap(14).AlignItems(ui.Center).Padding(0, 8, 0, 0)
 		info.Children(func() {
 			a.art(c, a.current.Thumbnail, playerArt, 64, m3.Large, func() {
 				if a.current.IsVideo() {
@@ -353,10 +356,6 @@ func (a *app) playerBar(c *ui.Context) {
 			})
 			a.trackLine(c, m3.TitleSmall, m3.BodySmall, true).Grow(1)
 		})
-		if info.Clicked() {
-			a.nowPlaying.open, a.nowPlaying.closing = true, false
-			a.loadPanel()
-		}
 
 		// In a narrow window the track keeps its share: the transport takes
 		// what it needs and the buttons on the right take no more than they
@@ -392,5 +391,9 @@ func (a *app) playerBar(c *ui.Context) {
 				a.openPlayer(a.nowPlaying.tab, false)
 			}
 		})
+		if bar.Clicked() {
+			a.nowPlaying.open, a.nowPlaying.closing = true, false
+			a.loadPanel()
+		}
 	})
 }

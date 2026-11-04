@@ -261,6 +261,7 @@ go_test(
         "miniplayer_test.go",
         "playback_integration_test.go",
         "playbackstate_test.go",
+        "playerbar_test.go",
         "playlist_sort_test.go",
         "queue_test.go",
         "refresh_test.go",
