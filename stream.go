@@ -173,6 +173,36 @@ func (a *app) syncPreload() {
 		// the held audio may belong to a track the filter just removed.
 		ok = false
 	}
+	if ok && next.IsVideo() {
+		song, known := a.songs.Get(next.VideoID)
+		switch {
+		case known && song.VideoID != "":
+			a.swapToSong(next.VideoID, song)
+			next = song
+		case !known:
+			// The audio held ready must be the song's, not the video's: the
+			// song is asked for now, and the preload starts once the answer
+			// lands. Nothing is eligible to preload yet.
+			if !a.preSong.busy() {
+				video := next
+				client := a.client()
+				startTask(a, &a.preSong, songResolveTimeout, func(ctx context.Context) (youtube.MusicItem, error) {
+					return a.searchSong(ctx, client, video)
+				}, func(song youtube.MusicItem, err error) {
+					if err != nil {
+						log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, err)
+					} else {
+						a.rememberSong(video.VideoID, song)
+						if song.VideoID != "" {
+							a.swapToSong(video.VideoID, song)
+						}
+					}
+					a.syncPreload()
+				})
+			}
+			ok = false
+		}
+	}
 	if held := a.player.Preloaded(); held != "" && (!ok || held != next.VideoID) {
 		a.player.CancelPreload()
 		a.preloaded = preloadedAudio{}

@@ -35,6 +35,7 @@ import (
 	"github.com/elianiva/meiro/internal/report"
 	"github.com/elianiva/meiro/internal/secretfile"
 	"github.com/elianiva/meiro/internal/settings"
+	"github.com/elianiva/meiro/internal/videosong"
 	"github.com/elianiva/meiro/player"
 	"github.com/elianiva/meiro/systemmedia"
 )
@@ -197,6 +198,7 @@ func (a *app) setup() {
 		a.account.creds.store = &secretfile.File{Path: filepath.Join(directory, "cookie.txt"), Keychain: mygo.Secrets, Name: credentialsKey}
 		a.historyPath = filepath.Join(directory, "history.json")
 		a.restorePlayback(filepath.Join(directory, "playback.json"))
+		a.songs = videosong.Open(filepath.Join(directory, "video-songs.json"))
 		a.openScrobbler(secretfile.File{Path: filepath.Join(directory, "lastfm-session.txt"), Keychain: mygo.Secrets, Name: credentialsKey}, filepath.Join(directory, "lastfm-pending.json"))
 		a.openCredits(filepath.Join(directory, "credits.json"))
 		a.openDownloads(filepath.Join(directory, "Downloads"))
@@ -273,6 +275,7 @@ func (a *app) shutdown() {
 	a.historyWriter.Wait()
 	a.downloads.writer.Wait()
 	a.playSave.writer.Wait()
+	a.songs.Wait()
 	a.scrobble.outbox.Wait()
 	a.scrobble.credits.Wait()
 	a.desktop.close()

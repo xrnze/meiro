@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **A music video plays its song.** When Meiro would play a track's music
+  video, it plays the song version of the same track instead, as YouTube
+  Music Premium members hear it: the queue, the cover and the title come
+  from the song, and a video with no song version plays itself as before.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Fixed

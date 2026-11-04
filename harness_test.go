@@ -229,6 +229,15 @@ func (fakeMusic) RoundTrip(request *http.Request) (*http.Response, error) {
 		searches.Add(1)
 		searchAsked.Store(asked)
 		reply = searchEpisodeResponse
+	case strings.Contains(asked, `"query":"Searched Song Someone"`):
+		searches.Add(1)
+		reply = songSearchResponse("song-id", "Searched Song", "Someone", "3:42")
+	case strings.Contains(asked, `"query":"Duration Song Someone"`):
+		searches.Add(1)
+		reply = songSearchResponse("duration-song-id", "Duration Song", "Someone", "6:00")
+	case strings.Contains(asked, `"query":"No Match Song Someone"`):
+		searches.Add(1)
+		reply = songSearchResponse("other-id", "Totally Different Song", "Someone", "3:42")
 	case strings.Contains(asked, "yor mixed"):
 		reply = searchMixedResponse
 	case strings.Contains(asked, `"query"`):
@@ -846,6 +855,20 @@ const searchFilteredResponse = `{"contents":{"tabbedSearchResultsRenderer":{"tab
 				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Someone"},{"text":" • "},{"text":"1:11"}]}}}
 			]}}]}}
 	]}}}}]}}}`
+
+// songSearchResponse is a search that found one song: the song version of the
+// track the query asked for. The song row names the artist and length next to
+// the title, as a search row does.
+func songSearchResponse(videoID, title, artists, duration string) string {
+	return `{"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
+		{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{
+			"playlistItemData":{"videoId":"` + videoID + `"},
+			"flexColumns":[
+				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"` + title + `"}]}}},
+				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"` + artists + `"},{"text":" • "},{"text":"` + duration + `"}]}}}
+			]}}]}}
+	]}}}}]}}}`
+}
 
 // searchMoreResponse is the page after the first: the rows a search adds as its
 // list reaches the end of what it has.

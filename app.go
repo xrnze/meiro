@@ -22,6 +22,7 @@ import (
 	"github.com/elianiva/meiro/internal/proc"
 	"github.com/elianiva/meiro/internal/report"
 	"github.com/elianiva/meiro/internal/settings"
+	"github.com/elianiva/meiro/internal/videosong"
 	"github.com/elianiva/meiro/m3"
 	"github.com/elianiva/meiro/player"
 	"github.com/elianiva/meiro/systemmedia"
@@ -72,6 +73,9 @@ type app struct {
 	colorsSeen []byte
 	// playSave keeps the queue and position for the next run.
 	playSave playbackSave
+	// songs remembers the song that plays in place of each music video, so
+	// a video is looked up once, between runs.
+	songs *videosong.Cache
 
 	account accountState
 	// scrobble is the Last.fm connection and the plays waiting for it.
@@ -224,6 +228,7 @@ func newApp() *app {
 		keyboard:   keyboardState{hintDelay: hintDelay},
 	}
 	a.scrobble = newScrobbler()
+	a.songs = videosong.Open("")
 	a.playback = newPlayback(audio.NewURLs(resolveAudio(youtube.NewClient(youtube.Options{}))), a.settings.Volume)
 	a.aiFilter = newAIFilter()
 	a.cacheSongsText = strconv.Itoa(a.settings.CacheSongs)
