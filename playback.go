@@ -231,6 +231,12 @@ func (a *app) songBeforePlay(item *youtube.MusicItem, startAt time.Duration, cha
 		a.player.Stop()
 		return a.searchSong(ctx, client, video)
 	}, func(song youtube.MusicItem, err error) {
+		// Another lookup may have answered for the video while this one was
+		// out; a song it found wins over this lookup's fallback.
+		if have, known := a.songs.Get(video.VideoID); known && have.VideoID != "" {
+			song = have
+			err = nil
+		}
 		if err != nil {
 			log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, err)
 			if !a.checkAIBeforePlay(video, startAt, changed) {
@@ -397,6 +403,32 @@ func (a *app) enqueue(item youtube.MusicItem, playNext bool) {
 		a.enqueueItem(item, playNext)
 		return
 	}
+	if a.queueSong.busy() {
+		// A lookup is on its way already, and starting another in the slot
+		// would supersede it and drop one of the additions. The row joins
+		// the queue as the video now, and a parallel lookup turns it into
+		// the song when it answers.
+		a.enqueueItem(item, playNext)
+		video := item
+		client := a.client()
+		spawn(a, func() songAnswer {
+			ctx, cancel := context.WithTimeout(context.Background(), songResolveTimeout)
+			defer cancel()
+			song, err := a.searchSong(ctx, client, video)
+			return songAnswer{song, err}
+		}, func(answer songAnswer) {
+			if answer.err != nil {
+				log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, answer.err)
+				return
+			}
+			a.rememberSong(video.VideoID, answer.song)
+			if answer.song.VideoID == "" {
+				return
+			}
+			a.swapToSong(video.VideoID, answer.song)
+		})
+		return
+	}
 	video := item
 	client := a.client()
 	startTask(a, &a.queueSong, songResolveTimeout, func(ctx context.Context) (youtube.MusicItem, error) {
@@ -409,10 +441,21 @@ func (a *app) enqueue(item youtube.MusicItem, playNext bool) {
 		}
 		a.rememberSong(video.VideoID, song)
 		if song.VideoID != "" {
-			video = song
+			// The row already in the queue for this video is turned into the
+			// song before the song joins the queue again.
+			a.swapToSong(video.VideoID, song)
+			a.enqueueItem(song, playNext)
+			return
 		}
 		a.enqueueItem(video, playNext)
 	})
+}
+
+// songAnswer is what the parallel lookup of a video queued while another
+// lookup is out brings back: the song it found, or why it could not look.
+type songAnswer struct {
+	song youtube.MusicItem
+	err  error
 }
 
 // enqueueItem puts item into the chosen queue without changing the current

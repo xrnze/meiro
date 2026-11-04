@@ -397,6 +397,45 @@ func TestAppendGeneratedKeepsChosenVideoWhenAudioVersionIsRecommended(t *testing
 	}
 }
 
+// The song that plays in place of a video replaces the video wherever it is,
+// and the play-next mark follows it. Chosen tracks around the boundary of the
+// generated ones keep their places.
+func TestSongOfReplacesAVideoAndFollowsPlayNext(t *testing.T) {
+	q := newQueue()
+	chosen := tracks("a", "b", "c")
+	chosen[1].Kind = youtube.KindVideo
+	q.replace(chosen[0], chosen, 0, "")
+	q.appendGenerated(tracks("r1", "r2"))
+	song := youtube.MusicItem{VideoID: "b-song", Title: "B Song", Kind: youtube.KindTrack}
+	q.songOf("b", song)
+
+	if got := ids(q.items); !slices.Equal(got, []string{"a", "b-song", "c", "r1", "r2"}) {
+		t.Fatalf("queue = %v, want the song in place of the video", got)
+	}
+	if q.recStart != 3 || !slices.Equal(ids(q.items[3:]), []string{"r1", "r2"}) || len(q.generated) != 2 {
+		t.Errorf("the generated boundary moved: recStart %d, %v", q.recStart, ids(q.items))
+	}
+
+	q.songOf("x", song) // a video the queue does not hold changes nothing
+	if got := ids(q.items); !slices.Equal(got, []string{"a", "b-song", "c", "r1", "r2"}) {
+		t.Errorf("a missing video changed the queue: %v", got)
+	}
+
+	q2 := newQueue()
+	q2.replace(tracks("p")[0], tracks("p"), 0, "")
+	q2.appendGenerated(tracks("r1"))
+	video := tracks("v")[0]
+	video.Kind = youtube.KindVideo
+	q2.insert(video, true, true) // play the video next, among the recommendations
+	q2.songOf("v", youtube.MusicItem{VideoID: "v-song", Kind: youtube.KindTrack})
+	if q2.playNext != "v-song" {
+		t.Errorf("play next marks %q, want the song", q2.playNext)
+	}
+	if next, ok := q2.next(true, repeatOff); !ok || q2.at(next).VideoID != "v-song" {
+		t.Errorf("the track to play next is %q, want the song", q2.at(next).VideoID)
+	}
+}
+
 func TestDroppingMarkedAITracksKeepsTheQueueConsistent(t *testing.T) {
 	chosen := []youtube.MusicItem{
 		{VideoID: "a", Title: "A"},

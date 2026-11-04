@@ -200,5 +200,11 @@ func (a *app) swapToSong(videoID string, song youtube.MusicItem) {
 	if a.current.VideoID == videoID {
 		a.current = song
 	}
+	// A video the listener queued keeps its chosen mark under the song that
+	// plays in its place.
+	if _, chosen := a.scrobble.queued[videoID]; chosen {
+		delete(a.scrobble.queued, videoID)
+		a.rememberQueued(song.VideoID)
+	}
 	a.page.rowsDirty = true
 }

@@ -3,7 +3,9 @@ package main
 import (
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/elianiva/meiro/youtube"
 )
@@ -112,6 +114,111 @@ func TestPlayingAVideoWhoseSongLengthMismatchesKeepsTheVideo(t *testing.T) {
 	}
 	if !r.asked("video-3") {
 		t.Errorf("the video's own audio was never resolved")
+	}
+}
+
+// TestTheNextTrackIsPreloadedAsItsSong checks that the track the player holds
+// ready is the song version of a video: the video is never resolved, and the
+// queue row is replaced by its song before the preload asks for audio.
+func TestTheNextTrackIsPreloadedAsItsSong(t *testing.T) {
+	a, r := playbackApp(t)
+	searches.Store(0)
+	base := tracks("a")
+	video := videoOf("Searched Song", "video-1", "3:42")
+	a.play(base[0], []youtube.MusicItem{base[0], video})
+	if !a.player.Playing() {
+		t.Skip("this environment has no audio device; the preload path needs a playing track")
+	}
+	// Bring the current track near its end so what follows is preloaded now.
+	a.total = a.player.Position() + 10*time.Second
+
+	a.syncPreload()
+	if got := ids(a.queue.items); !slices.Equal(got, []string{"a", "song-id"}) {
+		t.Fatalf("queue = %v, want the song in place of the video", got)
+	}
+	if !r.asked("song-id") || r.asked("video-1") {
+		t.Errorf("resolved %v, want only the song's audio", r.ids)
+	}
+	if searches.Load() != 1 {
+		t.Errorf("%d searches, want one for the video", searches.Load())
+	}
+}
+
+// TestEnqueueWhileALookupIsOutJoinsTheQueueAsTheVideo checks the second video
+// added while a song lookup is still out joins the queue as the video at
+// once, and the parallel lookup turns it into the song when it answers,
+// without dropping the first lookup's own song.
+func TestEnqueueWhileALookupIsOutJoinsTheQueueAsTheVideo(t *testing.T) {
+	a, _ := playbackApp(t)
+	base := tracks("a")
+	a.play(base[0], base)
+	// Hold every background job until the test runs it, so the first lookup
+	// is still out when the second add comes.
+	var mu sync.Mutex
+	var out []func()
+	a.run = func(work func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		out = append(out, work)
+	}
+	a.enqueue(videoOf("Searched Song", "video-1", "3:42"), false)
+	second := videoOf("Searched Song", "video-9", "3:42")
+	a.enqueue(second, false)
+	if !a.queueSong.busy() {
+		t.Fatal("the first lookup was not out when the second add came")
+	}
+	if got := ids(a.queue.items); !slices.Equal(got, []string{"a", "video-9"}) {
+		t.Fatalf("while the lookup is out the queue = %v, want a then the video", got)
+	}
+
+	mu.Lock()
+	deferred := out
+	out = nil
+	mu.Unlock()
+	for _, work := range deferred {
+		work()
+	}
+	if got := ids(a.queue.items); !slices.Equal(got, []string{"a", "song-id", "song-id"}) {
+		t.Fatalf("after the lookups the queue = %v, want both videos as the song", got)
+	}
+	if _, chosen := a.scrobble.queued["video-9"]; chosen {
+		t.Errorf("the chosen mark stayed on the video")
+	}
+	if _, chosen := a.scrobble.queued["song-id"]; !chosen {
+		t.Errorf("the chosen mark did not follow the song")
+	}
+}
+
+// TestALookupThatAnswersLatePrefersTheCachedSong checks a song lookup that
+// comes back after another lookup already answered for the video plays the
+// song the cache holds, not its own answer.
+func TestALookupThatAnswersLatePrefersTheCachedSong(t *testing.T) {
+	a, _ := playbackApp(t)
+	video := videoOf("Searched Song", "video-1", "3:42")
+	// Hold every background job until the test runs it, so the lookup of the
+	// play is still out when another one answers for the video.
+	var mu sync.Mutex
+	var out []func()
+	a.run = func(work func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		out = append(out, work)
+	}
+	a.play(video, []youtube.MusicItem{video})
+	a.rememberSong("video-1", youtube.MusicItem{VideoID: "song-id-2", Title: "Searched Song", Artist: "Someone", Kind: youtube.KindTrack})
+
+	mu.Lock()
+	deferred := out
+	out = nil
+	mu.Unlock()
+	for _, work := range deferred {
+		work()
+	}
+	if a.current.VideoID != "song-id-2" {
+		t.Fatalf("the late lookup played %q, want the song the cache holds", a.current.VideoID)
+	}
+	if got := ids(a.queue.items); !slices.Equal(got, []string{"song-id-2"}) {
+		t.Errorf("the queue holds %v, want the song the cache holds", got)
 	}
 }
 

@@ -198,6 +198,7 @@ func (a *app) syncPreload() {
 						}
 					}
 					a.syncPreload()
+					a.warmNext()
 				})
 			}
 			ok = false
@@ -416,6 +417,12 @@ func (a *app) warmNext() {
 	// In repeat-track mode following is the current track, whose audio is
 	// already playing; do not resolve it again.
 	if next.VideoID == "" || next.VideoID == a.current.VideoID || a.isDownloaded(next.VideoID) {
+		return
+	}
+	// A video whose song has not been found yet is not warmed: once the song
+	// is known the queue row is replaced by it, and this resolve would be
+	// thrown away with the video.
+	if _, known := a.songFor(next); !known {
 		return
 	}
 	cache := a.currentAudioCache()
