@@ -122,11 +122,11 @@ func isSongKindName(name string) bool {
 const maxVideoIntro = 30 * time.Second
 
 // bestSongFor is the song among songs that plays the same track as video:
-// one that folds to the same title, names the same artist, and is about as
-// long, allowing the video its intro and outro. The song whose length is
-// closest to the video's wins.
+// one that folds to the same title, names the same artist, or names none,
+// and is about as long, allowing the video its intro and outro. The song
+// whose length is closest to the video's wins.
 func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.MusicItem, bool) {
-	title := songTitleFold(video.Title)
+	title := videoTitleFold(video.Title)
 	if title == "" {
 		return youtube.MusicItem{}, false
 	}
@@ -146,7 +146,9 @@ func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.Mu
 				continue
 			}
 		}
-		if len(wantArtists) > 0 && !songArtistMatches(song, wantArtists) {
+		if len(wantArtists) > 0 && len(songArtistFolds(song)) > 0 && !songArtistMatches(song, wantArtists) {
+			// A song that names no artist of its own, as a search answer
+			// does, is judged by its title and length alone.
 			continue
 		}
 		gap := songLengthGap(videoLength, parseDuration(song.Duration))
@@ -166,9 +168,19 @@ func songLengthGap(a, b time.Duration) time.Duration {
 	return (a - b).Abs()
 }
 
+// videoTitleFold folds the title a video upload carries, whose uploader
+// names itself before the song, as "K/DA - FIRESTARTER" does.
+func videoTitleFold(title string) string {
+	if _, rest, found := strings.Cut(title, " - "); found && strings.TrimSpace(rest) != "" {
+		title = strings.TrimSpace(rest)
+	}
+	return songTitleFold(title)
+}
+
 // songTitleFold is a title in the form uploads of the same song share:
-// lowercase, without punctuation or spacing, and without a trailing phrase
-// naming the kind of upload.
+// lowercase, without punctuation or spacing, without a trailing phrase
+// naming the kind of upload, and without the list of featured artists
+// that follows it.
 func songTitleFold(title string) string {
 	title = strings.ToLower(strings.TrimSpace(title))
 	for {
@@ -181,7 +193,26 @@ func songTitleFold(title string) string {
 		}
 		title = shortened
 	}
-	return normalizeName(title)
+	return normalizeName(cutFeaturedArtists(title))
+}
+
+// cutFeaturedArtists removes the list of featured artists from a title:
+// everything from a "feat", "ft" or "featuring" word on. The word may
+// carry the punctuation of a parenthetical, as "(feat." does.
+func cutFeaturedArtists(title string) string {
+	words := strings.Fields(title)
+	for i, word := range words {
+		switch strings.TrimSuffix(strings.Trim(word, "().,"), ".") {
+		case "feat", "ft", "featuring":
+			if short := strings.TrimSpace(strings.Join(words[:i], " ")); short != "" {
+				return short
+			}
+			// The featured artists name the whole title, as "Ft.
+			// Lauderdale" does: the title keeps what it was.
+			return title
+		}
+	}
+	return title
 }
 
 // videoTitleLabels are the trailing phrases that mark a video upload, which

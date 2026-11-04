@@ -25,7 +25,7 @@ const MaxEntries = 5000
 // older matcher found no song for may have one the current matcher finds,
 // so its no-song answers are dropped on read; a song answer it made holds
 // under any matcher.
-const fileVersion = 2
+const fileVersion = 3
 
 type entry struct {
 	ID string `json:"id"`

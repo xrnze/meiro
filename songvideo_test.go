@@ -384,6 +384,28 @@ func TestBestSongFor(t *testing.T) {
 		{"a video whose intro runs longer still has its song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:23")}, "song-id"},
 		{"a video half a minute longer is still the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:12")}, "song-id"},
 		{"a video half a minute and a second longer is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:11")}, ""},
+		{
+			"a video titled artist - song finds its song", videoOf("Someone - Searched Song ft. Other (Official Music Video)", "video-1", "3:42"),
+			[]youtube.MusicItem{song("song-id", "Searched Song", "", "3:23")},
+			"song-id",
+		},
+		{"a song whose featured artists are named still matches", video, []youtube.MusicItem{song("song-id", "Searched Song (feat. Other)", "Someone", "3:42")}, "song-id"},
+		{"a song whose featured artists are spelled out still matches", video, []youtube.MusicItem{song("song-id", "Searched Song (featuring Other)", "Someone", "3:42")}, "song-id"},
+		{"a song with a dash of its own is not cut", video, []youtube.MusicItem{song("song-id", "Searched Song - Live in Rome", "Someone", "3:42")}, ""},
+		{
+			"a video whose song has a dash of its own finds it", videoOf("Someone - Searched Song - Second Part (Official Audio)", "video-1", "3:42"),
+			[]youtube.MusicItem{song("song-id", "Searched Song - Second Part", "Someone", "3:42")},
+			"song-id",
+		},
+		{"nameless songs are told apart by length", video, []youtube.MusicItem{
+			song("song-far", "Searched Song", "", "3:46"),
+			song("song-near", "Searched Song", "", "3:40"),
+		}, "song-near"},
+		{
+			"an uploader's name that is the whole title is not the song", videoOf("Someone - Searched Song ft. Other (Official Music Video)", "video-1", "3:42"),
+			[]youtube.MusicItem{song("song-id", "Someone", "", "3:42")},
+			"",
+		},
 		{"a video with a two-minute intro is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "1:42")}, ""},
 		{"an unknown video length matches by title and artist", videoOf("Searched Song", "video-1", ""), []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "6:00")}, "song-id"},
 		{"a video without an artist matches by title and length", noArtistVideo("Searched Song", "3:42"), []youtube.MusicItem{song("song-id", "Searched Song", "", "3:42")}, "song-id"},

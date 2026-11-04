@@ -27,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- **A music video with an intro now plays its song.** The song lookup for a video allowed a couple of seconds of difference, so a music video that runs longer than its song, by an intro or an outro of up to half a minute, was treated as having no song version and played itself, at the quieter level its video master was mixed at. A video may now run up to 30 seconds longer than its song and still plays the song; a song longer than its video is still a different edit, and keeps the video playing.
+- **A music video with an intro now plays its song.** The song lookup for a video allowed a couple of seconds of difference, so a music video that runs longer than its song, by an intro or an outro of up to half a minute, was treated as having no song version and played itself, at the quieter level its video master was mixed at. A video may now run up to 30 seconds longer than its song and still plays the song; a song longer than its video is still a different edit, and keeps the video playing. A video titled "Artist - Song", the shape YouTube uploads have, now matches its song too, whose title carries neither the uploader's name nor the featured artists, and songs a search answers without an artist are no longer ruled out on that count.
 
 - **A crashed ffmpeg says so.** When the ffmpeg process dies without a word, the playback failure now reads, for example, "ffmpeg crashed: signal: segmentation fault" instead of "ffmpeg stopped", so a broken ffmpeg build is visible in the log.
 
