@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
@@ -31,9 +33,28 @@ func (a *app) searchSong(ctx context.Context, client *youtube.Client, video yout
 	}
 	song, ok := bestSongFor(video, songs)
 	if !ok {
+		// The miss is cached for good, so it is worth saying why: the query
+		// found nothing, or a candidate failed a gate the log can name.
+		log.Printf("playback: no song for video_id=%s query=%q: %s", video.VideoID, songSearchQuery(video), songCandidates(video, songs))
 		return youtube.MusicItem{}, nil
 	}
 	return song, nil
+}
+
+// songCandidates names the search results a song lookup can pick from, with
+// the length and artist each would be matched on, so a log of a miss shows
+// which gate ruled every candidate out.
+func songCandidates(video youtube.MusicItem, songs []youtube.MusicItem) string {
+	if len(songs) == 0 {
+		return "the search answered no songs"
+	}
+	parts := make([]string, 0, len(songs))
+	for _, song := range songs {
+		parts = append(parts, fmt.Sprintf("%q id=%s artist=%q fold=%q length=%s",
+			song.Title, song.VideoID, song.Artist, songTitleFold(song.Title), song.Duration))
+	}
+	return fmt.Sprintf("video fold=%q length=%s, candidates: %s",
+		songTitleFold(video.Title), video.Duration, strings.Join(parts, "; "))
 }
 
 // songSearchQuery is what a search for the song version of a track asks: its
