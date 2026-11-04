@@ -10,6 +10,13 @@ import (
 	"github.com/elianiva/meiro/youtube"
 )
 
+// Slider tracks keep their resting thickness until the user hovers or focuses
+// them, then thicken, and their thumb with them, so they are easier to grab.
+const (
+	sliderThin  float32 = 4
+	sliderThick float32 = 12
+)
+
 // transport builds the controls that start, stop and move through the queue:
 // shuffle, previous, play or pause, next and repeat. The play button is a
 // circle that squares off while the music plays, so the state shows in its
@@ -71,7 +78,7 @@ func (a *app) transport(c *ui.Context, size float32, gap float32) {
 // scrubber is the position slider: a wave that travels while the music plays
 // and goes flat when it stops. It follows the player until the user takes it,
 // and seeks when they let go. Times stand at both ends.
-func (a *app) scrubber(c *ui.Context) {
+func (a *app) scrubber(c *ui.Context, exp *sliderExpand) {
 	sc := m3.Of(c).Scheme
 	known := a.total > 0
 	total := a.total.Seconds()
@@ -82,9 +89,18 @@ func (a *app) scrubber(c *ui.Context) {
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		m3.Text(c, m3.LabelMedium, clock(time.Duration(a.scrub*float64(time.Second)))).
 			MinWidth(40).NoWrap().TextAlign(ui.End).Shrink(0).TextColor(sc.OnSurfaceVariant).FontFeatures("tnum")
+		thick := sliderThin
+		if exp.scrub {
+			thick = sliderThick
+		}
 		slider := m3.Slider(c, &a.scrub, 0, total, m3.SliderSpec{
-			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known,
+			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known, Thickness: thick,
 		})
+		expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+		if expanded != exp.scrub {
+			exp.scrub = expanded
+			c.Invalidate()
+		}
 		if slider.Pressed() {
 			a.scrubbing = true
 		}
@@ -122,9 +138,18 @@ func (a *app) muteButton(c *ui.Context) ui.Element {
 
 // volumeSlider is the volume setting, horizontal in the player bar and
 // vertical in the narrow bar's hover panel.
-func (a *app) volumeSlider(c *ui.Context, vertical bool) ui.Element {
+func (a *app) volumeSlider(c *ui.Context, vertical bool, exp *sliderExpand) ui.Element {
 	v := a.volume
-	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical})
+	thick := sliderThin
+	if exp.volume {
+		thick = sliderThick
+	}
+	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical, Thickness: thick})
+	expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+	if expanded != exp.volume {
+		exp.volume = expanded
+		c.Invalidate()
+	}
 	if slider.Changed() {
 		a.setVolume(v)
 	}
@@ -141,27 +166,41 @@ func (a *app) volumeSlider(c *ui.Context, vertical bool) ui.Element {
 	return slider
 }
 
+// volumeReadout floats the current volume, as a number, above the volume
+// control while it is hovered or focused, so a glance says how loud it is.
+func (a *app) volumeReadout(c *ui.Context, anchor ui.Element, show bool) {
+	sc := m3.Of(c).Scheme
+	// The dismissal write to open is discarded on purpose: the readout is
+	// recomputed from hover each frame, so there is no state to persist.
+	open := show
+	ui.PopoverBase(c, anchor, &open, func(panel ui.Element) {
+		panel.Key("volume-readout").Padding(2, 7).Radius(m3.Small).Background(sc.SurfaceContainerHigh).
+			AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorBottomLeft).Margin(0, 0, 6, 0)
+		m3.Elevation(c, panel, 2)
+		m3.LabelMedium.Style(ui.Text(c, strconv.Itoa(int(a.volume))), false).TextColor(sc.OnSurface)
+	})
+}
+
 // volumeControl is the speaker button, which mutes, and the slider beside it.
-func (a *app) volumeControl(c *ui.Context, sliderWidth float32) {
+func (a *app) volumeControl(c *ui.Context, sliderWidth float32, exp *sliderExpand) {
 	a.nowPlaying.volumePopup = false
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-		a.hinted(c, func() {
-			a.muteButton(c)
-		}, keymap.Mute)
-		if sliderWidth <= 0 {
-			return
+		var anchor, slider ui.Element
+		a.hinted(c, func() { anchor = a.muteButton(c) }, keymap.Mute)
+		if sliderWidth > 0 {
+			a.hinted(c, func() {
+				ui.Row(c).Width(sliderWidth).Children(func() {
+					slider = a.volumeSlider(c, false, exp)
+				})
+			}, keymap.VolumeUp, keymap.VolumeDown)
 		}
-		a.hinted(c, func() {
-			ui.Row(c).Width(sliderWidth).Children(func() {
-				a.volumeSlider(c, false)
-			})
-		}, keymap.VolumeUp, keymap.VolumeDown)
+		a.volumeReadout(c, anchor, anchor.Hovered() || anchor.FocusVisible() || slider.Hovered() || slider.FocusVisible())
 	})
 }
 
 // compactVolumeControl keeps the mute button in the narrow player bar and
 // reveals an upright volume slider while the button or its panel is hovered.
-func (a *app) compactVolumeControl(c *ui.Context) {
+func (a *app) compactVolumeControl(c *ui.Context, exp *sliderExpand) {
 	sc := m3.Of(c).Scheme
 	ui.Row(c).Shrink(0).Children(func() {
 		var anchor ui.Element
@@ -173,8 +212,9 @@ func (a *app) compactVolumeControl(c *ui.Context) {
 			panel.Key("volume-popup").Width(64).Padding(8).Radius(m3.Large).Margin(0).Background(sc.SurfaceContainerHigh)
 			m3.Elevation(c, panel, 3)
 			a.hinted(c, func() {
-				ui.Column(c).Width(48).Height(128).Center().Children(func() {
-					slider = a.volumeSlider(c, true)
+				ui.Column(c).Width(48).Height(140).Gap(4).Center().Children(func() {
+					m3.LabelMedium.Style(ui.Text(c, strconv.Itoa(int(a.volume))), false).TextColor(sc.OnSurface)
+					slider = a.volumeSlider(c, true, exp)
 				})
 			}, keymap.VolumeUp, keymap.VolumeDown)
 		})
@@ -366,7 +406,7 @@ func (a *app) playerBar(c *ui.Context) {
 		}
 		ui.Column(c).Grow(transportGrow).Basis(0).MinWidth(220).MaxWidth(580).Gap(0).Children(func() {
 			a.transport(c, 48, 4)
-			a.scrubber(c)
+			a.scrubber(c, &a.nowPlaying.expand)
 		})
 
 		// The buttons on the right never overflow the bar: when their share is
@@ -379,9 +419,9 @@ func (a *app) playerBar(c *ui.Context) {
 		}
 		end.Children(func() {
 			if wide {
-				a.volumeControl(c, 108)
+				a.volumeControl(c, 108, &a.nowPlaying.expand)
 			} else {
-				a.compactVolumeControl(c)
+				a.compactVolumeControl(c, &a.nowPlaying.expand)
 			}
 			a.speedButton(c, "bar-speed")
 			if m3.IconButton(c, m3.IconButtonSpec{Icon: m3.IconQueue, Label: "Up next", Key: "bar-queue"}).Clicked() {
