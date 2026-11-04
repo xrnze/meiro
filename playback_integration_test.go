@@ -910,7 +910,19 @@ func TestSeekingMovesThePlayerOffTheMainThread(t *testing.T) {
 	a.total, a.scrub = 15*time.Second, 9
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	tabTo(t, tt, "Position")
+	// The bar is one focusable background press now, an ancestor of the
+	// scrubber, and Focused matches a label's ancestors: tab to the bar
+	// first, then past its controls to the scrubber itself.
+	tabTo(t, tt, "Open the full player")
+	for range 20 {
+		if tt.Focused("Position") && !tt.Focused("Open the full player") {
+			break
+		}
+		tt.Key(0, ui.KeyTab)
+	}
+	if !tt.Focused("Position") || tt.Focused("Open the full player") {
+		t.Fatal("Tab never reached the scrubber")
+	}
 	tt.Key(0, ui.KeyHome)
 	drain()
 	if got := a.player.Position(); got > time.Second {

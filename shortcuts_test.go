@@ -251,7 +251,19 @@ func TestKeyboardPlayerTabsAndQueue(t *testing.T) {
 	a.queue.replace(a.current, tracks("a", "b", "c"), 0, "Keyboard test")
 	tt := ui.NewTester(a.view, 1280, 800)
 	tt.Frame()
-	tabTo(t, tt, "Up next")
+	// The bar is one focusable background press now, an ancestor of its
+	// buttons, and Focused matches a label's ancestors: tab to the bar
+	// first, then past its controls to the "Up next" button itself.
+	tabTo(t, tt, "Open the full player")
+	for range 20 {
+		if tt.Focused("Up next") && !tt.Focused("Open the full player") {
+			break
+		}
+		tt.Key(0, ui.KeyTab)
+	}
+	if !tt.Focused("Up next") || tt.Focused("Open the full player") {
+		t.Fatal("Tab never reached the Up next button")
+	}
 	tt.Key(0, ui.KeyEnter)
 	tt.Advance(time.Second)
 	tabTo(t, tt, "Up next")
@@ -297,7 +309,19 @@ func TestKeyboardVolumeIsSaved(t *testing.T) {
 	a.saver.Path = filepath.Join(t.TempDir(), "settings.json")
 	tt := ui.NewTester(a.view, width, 700)
 	tt.Frame()
-	tabTo(t, tt, "Volume")
+	// The bar is one focusable background press now, an ancestor of the
+	// volume slider, and Focused matches a label's ancestors: tab to the bar
+	// first, then past its controls to the volume slider itself.
+	tabTo(t, tt, "Open the full player")
+	for range 20 {
+		if tt.Focused("Volume") && !tt.Focused("Mute") {
+			break
+		}
+		tt.Key(0, ui.KeyTab)
+	}
+	if !tt.Focused("Volume") || tt.Focused("Mute") {
+		t.Fatal("Tab never reached the volume slider")
+	}
 	tt.Key(0, ui.KeyLeft)
 	a.saver.Wait()
 	if a.volume != 36 || settings.Load(a.saver.Path).Volume != 36 {

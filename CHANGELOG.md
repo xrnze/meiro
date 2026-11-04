@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
+### Changed
+
+- **The player bar's empty space opens the full player.** The track's name and cover are no longer one giant button over the left of the bar; only its artist and album links act as buttons. Pressing the bar's empty areas, the padding and the spaces between its sections, opens the now-playing view, as the chevron next to the volume still does, and the chevron works as before.
+
 ### Fixed
 
 - **Adding to the queue keeps the song after the one playing.** When Auto-play had already moved into recommendations, an added song went back to the original queue behind the track playing, so it never played. It now joins the queue after the current track, and recommendations that have played fold into the queue above the Recommended heading as YouTube Music does.
