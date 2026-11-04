@@ -173,6 +173,45 @@ func (a *app) syncPreload() {
 		// the held audio may belong to a track the filter just removed.
 		ok = false
 	}
+	// A lookup that failed for the video that followed before is not held
+	// against another track that follows now.
+	if a.preSongFailed != "" && a.preSongFailed != next.VideoID {
+		a.preSongFailed = ""
+	}
+	if ok && next.IsVideo() {
+		song, known := a.songs.Get(next.VideoID)
+		switch {
+		case known && song.VideoID != "":
+			a.swapToSong(next.VideoID, song)
+			next = song
+		case !known:
+			// The audio held ready must be the song's, not the video's: the
+			// song is asked for now, and the preload starts once the answer
+			// lands. Nothing is eligible to preload yet. A lookup that
+			// failed for this video is not asked for again while it still
+			// follows.
+			if !a.preSong.busy() && a.preSongFailed != next.VideoID {
+				video := next
+				client := a.client()
+				startTask(a, &a.preSong, songResolveTimeout, func(ctx context.Context) (youtube.MusicItem, error) {
+					return a.searchSong(ctx, client, video)
+				}, func(song youtube.MusicItem, err error) {
+					if err != nil {
+						log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, err)
+						a.preSongFailed = video.VideoID
+					} else {
+						a.rememberSong(video.VideoID, song)
+						if song.VideoID != "" {
+							a.swapToSong(video.VideoID, song)
+						}
+					}
+					a.syncPreload()
+					a.warmNext()
+				})
+			}
+			ok = false
+		}
+	}
 	if held := a.player.Preloaded(); held != "" && (!ok || held != next.VideoID) {
 		a.player.CancelPreload()
 		a.preloaded = preloadedAudio{}
@@ -386,6 +425,12 @@ func (a *app) warmNext() {
 	// In repeat-track mode following is the current track, whose audio is
 	// already playing; do not resolve it again.
 	if next.VideoID == "" || next.VideoID == a.current.VideoID || a.isDownloaded(next.VideoID) {
+		return
+	}
+	// A video whose song has not been found yet is not warmed: once the song
+	// is known the queue row is replaced by it, and this resolve would be
+	// thrown away with the video.
+	if _, known := a.songFor(next); !known {
 		return
 	}
 	cache := a.currentAudioCache()

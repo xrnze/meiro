@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "videosong",
+    srcs = ["videosong.go"],
+    importpath = "github.com/elianiva/meiro/internal/videosong",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/fsutil",
+        "//youtube",
+    ],
+)
+
+go_test(
+    name = "videosong_test",
+    srcs = ["videosong_test.go"],
+    embed = [":videosong"],
+    deps = ["//youtube"],
+)

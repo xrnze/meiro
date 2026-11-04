@@ -57,6 +57,16 @@ type playback struct {
 	// aiCheck checks the chosen track before stream finds its audio.
 	stream  task
 	aiCheck task
+	// songCheck finds the song that plays in place of a video before the
+	// video starts; queueSong does the same for a video joining the queue,
+	// and preSong for the video the player is about to hold ready.
+	songCheck task
+	queueSong task
+	preSong   task
+	// preSongFailed is the video whose song lookup failed while it was the
+	// track that follows, which is not asked for again until another track
+	// follows.
+	preSongFailed string
 	// notificationArtwork loads the current cover before showing its track
 	// notification on Windows.
 	notificationArtwork task
@@ -188,12 +198,70 @@ func (a *app) skipUnplayable(item youtube.MusicItem) {
 // the queue chose item, rather than the listener.
 func (a *app) startTrack(item youtube.MusicItem, automatic bool) {
 	a.aiCheck.stop()
+	a.songCheck.stop()
 	a.stream.stop()
 	startAt, changed := a.enterTrack(item, automatic)
+	if a.songBeforePlay(&item, startAt, changed) {
+		return
+	}
 	if a.checkAIBeforePlay(item, startAt, changed) {
 		return
 	}
 	a.startTrackNow(item, startAt, changed)
+}
+
+// songBeforePlay makes item the song that plays in place of a video the
+// listener chose: a known song swaps in at once, and an unknown one is
+// searched for off the main thread, the track starting once the answer
+// lands. It reports whether it took over. As the AI check does, the search
+// stops the old audio while it is out, so the track that ends up playing is
+// the one the listener hears.
+func (a *app) songBeforePlay(item *youtube.MusicItem, startAt time.Duration, changed bool) bool {
+	if !item.IsVideo() {
+		return false
+	}
+	if song, known := a.songs.Get(item.VideoID); known {
+		if song.VideoID != "" {
+			a.swapToSong(item.VideoID, song)
+			*item = song
+		}
+		return false
+	}
+	video := *item
+	client := a.client()
+	startTask(a, &a.songCheck, songResolveTimeout, func(ctx context.Context) (youtube.MusicItem, error) {
+		// Like stream resolution, a newly chosen track replaces the old
+		// audio off the main thread, including any held preload.
+		a.player.Stop()
+		return a.searchSong(ctx, client, video)
+	}, func(song youtube.MusicItem, err error) {
+		// Another lookup may have answered for the video while this one was
+		// out; a song it found wins over this lookup's fallback.
+		if have, known := a.songs.Get(video.VideoID); known && have.VideoID != "" {
+			song = have
+			err = nil
+		}
+		if err != nil {
+			log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, err)
+			if !a.checkAIBeforePlay(video, startAt, changed) {
+				a.startTrackNow(video, startAt, changed)
+			}
+			return
+		}
+		a.rememberSong(video.VideoID, song)
+		if song.VideoID == "" {
+			// No song version exists: the video plays itself.
+			if !a.checkAIBeforePlay(video, startAt, changed) {
+				a.startTrackNow(video, startAt, changed)
+			}
+			return
+		}
+		a.swapToSong(video.VideoID, song)
+		if !a.checkAIBeforePlay(song, startAt, changed) {
+			a.startTrackNow(song, startAt, changed)
+		}
+	})
+	return true
 }
 
 // startTrackNow finds the chosen track's audio after the AI check lets it
@@ -311,13 +379,14 @@ func (a *app) trackNotices() trackNotices {
 }
 
 // starting reports whether a chosen track is being checked or resolved.
-func (a *app) starting() bool { return a.aiCheck.busy() || a.stream.busy() }
+func (a *app) starting() bool { return a.aiCheck.busy() || a.stream.busy() || a.songCheck.busy() }
 
 // loading includes ffmpeg opening the audio after the checks and resolution.
 func (a *app) loading() bool { return a.starting() || a.player.Buffering() }
 
 // enqueue adds a track to the chosen queue without changing the current
-// track. Chosen tracks stay ahead of auto-play recommendations.
+// track. Chosen tracks stay ahead of auto-play recommendations. A video is
+// asked for its song version first, so the queue shows what plays.
 func (a *app) enqueue(item youtube.MusicItem, playNext bool) {
 	if item.VideoID == "" {
 		return
@@ -331,6 +400,71 @@ func (a *app) enqueue(item youtube.MusicItem, playNext bool) {
 		a.notice = "Playing " + item.Title
 		return
 	}
+	if song, known := a.songFor(item); known {
+		if song.VideoID != "" {
+			item = song
+		}
+		a.enqueueItem(item, playNext)
+		return
+	}
+	if a.queueSong.busy() {
+		// A lookup is on its way already, and starting another in the slot
+		// would supersede it and drop one of the additions. The row joins
+		// the queue as the video now, and a parallel lookup turns it into
+		// the song when it answers.
+		a.enqueueItem(item, playNext)
+		video := item
+		client := a.client()
+		spawn(a, func() songAnswer {
+			ctx, cancel := context.WithTimeout(context.Background(), songResolveTimeout)
+			defer cancel()
+			song, err := a.searchSong(ctx, client, video)
+			return songAnswer{song, err}
+		}, func(answer songAnswer) {
+			if answer.err != nil {
+				log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, answer.err)
+				return
+			}
+			a.rememberSong(video.VideoID, answer.song)
+			if answer.song.VideoID == "" {
+				return
+			}
+			a.swapToSong(video.VideoID, answer.song)
+		})
+		return
+	}
+	video := item
+	client := a.client()
+	startTask(a, &a.queueSong, songResolveTimeout, func(ctx context.Context) (youtube.MusicItem, error) {
+		return a.searchSong(ctx, client, video)
+	}, func(song youtube.MusicItem, err error) {
+		if err != nil {
+			log.Printf("playback: song resolution failed video_id=%s: %v", video.VideoID, err)
+			a.enqueueItem(video, playNext)
+			return
+		}
+		a.rememberSong(video.VideoID, song)
+		if song.VideoID != "" {
+			// The row already in the queue for this video is turned into the
+			// song before the song joins the queue again.
+			a.swapToSong(video.VideoID, song)
+			a.enqueueItem(song, playNext)
+			return
+		}
+		a.enqueueItem(video, playNext)
+	})
+}
+
+// songAnswer is what the parallel lookup of a video queued while another
+// lookup is out brings back: the song it found, or why it could not look.
+type songAnswer struct {
+	song youtube.MusicItem
+	err  error
+}
+
+// enqueueItem puts item into the chosen queue without changing the current
+// track. Chosen tracks stay ahead of auto-play recommendations.
+func (a *app) enqueueItem(item youtube.MusicItem, playNext bool) {
 	a.queue.insert(item, playNext, a.settings.AutoPlay)
 	a.clearQueueSelection()
 	a.rememberQueued(item.VideoID)
@@ -573,6 +707,7 @@ func (a *app) advance() {
 // stopAtQueueEnd stops playback, and drops a track still being found.
 func (a *app) stopAtQueueEnd() {
 	a.aiCheck.stop()
+	a.songCheck.stop()
 	a.stream.stop()
 	a.finishEpisodeProgress(false)
 	a.player.Stop()

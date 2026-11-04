@@ -11,6 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The player shows the volume as a number.** While the cursor is over or the focus is on the volume control, the current level reads, for example, 72, floated above it in the player bar and in the full-screen player. The narrow bar's volume panel shows it over its slider too.
 - **The position and volume sliders grow as you reach for them.** Hovering or tabbing to the scrubber or the volume slider thickens its track and its thumb, and they settle back when you move on.
 - **Pin playlists to the sidebar.** The menu of a playlist page pins it to the navigation rail, where its cover and name sit under the destinations above Settings. Clicking one opens the playlist, and the rail keeps it selected while the playlist is showing. Pinned playlists survive restarts, and the same menu unpins them. Deleting a playlist takes its pin off too, and a playlist's page keeps the pin's name and cover up to date when the playlist is renamed or gets a new cover.
+- **A music video plays its song.** When Meiro would play a track's music
+  video, it plays the song version of the same track instead, as YouTube
+  Music Premium members hear it: the queue, the cover and the title come
+  from the song, and a video with no song version plays itself as before.
+  Videos added to the queue while their song is still being found join it
+  right away, and each turns into its song when the answer lands. Last.fm
+  hears of the song too: the play being scrobbled becomes the song's title
+  and artist when the answer lands, not the video's.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Changed

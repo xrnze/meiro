@@ -267,6 +267,24 @@ func (q *queue) remove(index int) bool {
 	return true
 }
 
+// songOf makes the queue hold the song that plays in place of the video with
+// videoID, wherever that video is, and moves the play-next mark to the song.
+// Generated tracks are never videos, so the boundary and the generated set
+// do not move.
+func (q *queue) songOf(videoID string, song youtube.MusicItem) {
+	if song.VideoID == "" {
+		return
+	}
+	for i := range q.items {
+		if q.items[i].VideoID == videoID {
+			q.items[i] = song
+		}
+	}
+	if q.playNext == videoID {
+		q.playNext = song.VideoID
+	}
+}
+
 // dropMarkedAI removes future tracks exclude rejects, leaving the track that
 // plays in place. The queue's boundary and generated-track bookkeeping follow
 // through remove.

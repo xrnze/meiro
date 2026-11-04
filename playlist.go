@@ -400,6 +400,27 @@ func (a *app) choosePlaylist(playlist youtube.MusicItem) {
 	spawn(a, func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 		defer cancel()
+		// A playlist is offered the song version of a video, so the track
+		// saved and shown is the one that plays. The search runs inside the
+		// write's budget: a search that eats it makes the add time out, and
+		// the playlist then gets neither the song nor the video.
+		if item.IsVideo() && a.songs != nil {
+			if song, known := a.songs.Get(item.VideoID); known {
+				if song.VideoID != "" {
+					item = song
+				}
+			} else {
+				findCtx, stopSearch := context.WithTimeout(ctx, songResolveTimeout)
+				found, err := a.searchSong(findCtx, client, item)
+				stopSearch()
+				if err == nil {
+					a.rememberSong(item.VideoID, found)
+					if found.VideoID != "" {
+						item = found
+					}
+				}
+			}
+		}
 		return client.AddToPlaylist(ctx, target.ID, item.VideoID)
 	}, func(err error) {
 		d.busy = false
