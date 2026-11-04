@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **A music video with an intro now plays its song.** The song lookup for a video allowed a couple of seconds of difference, so a music video that runs longer than its song, by an intro or an outro of up to half a minute, was treated as having no song version and played itself, at the quieter level its video master was mixed at. A video may now run up to 30 seconds longer than its song and still plays the song; a song longer than its video is still a different edit, and keeps the video playing.
+
 - **A crashed ffmpeg says so.** When the ffmpeg process dies without a word, the playback failure now reads, for example, "ffmpeg crashed: signal: segmentation fault" instead of "ffmpeg stopped", so a broken ffmpeg build is visible in the log.
 
 - **Adding to the queue keeps the song after the one playing.** When Auto-play had already moved into recommendations, an added song went back to the original queue behind the track playing, so it never played. It now joins the queue after the current track, and recommendations that have played fold into the queue above the Recommended heading as YouTube Music does.

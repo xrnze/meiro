@@ -380,6 +380,11 @@ func TestBestSongFor(t *testing.T) {
 		{"a different title is not the song", video, []youtube.MusicItem{song("song-id", "Other Song", "Someone", "3:42")}, ""},
 		{"another artist is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Somebody Else", "3:42")}, ""},
 		{"a much longer upload is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "6:00")}, ""},
+		{"a song even a few seconds longer is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:46")}, ""},
+		{"a video whose intro runs longer still has its song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:23")}, "song-id"},
+		{"a video half a minute longer is still the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:12")}, "song-id"},
+		{"a video half a minute and a second longer is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "3:11")}, ""},
+		{"a video with a two-minute intro is not the song", video, []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "1:42")}, ""},
 		{"an unknown video length matches by title and artist", videoOf("Searched Song", "video-1", ""), []youtube.MusicItem{song("song-id", "Searched Song", "Someone", "6:00")}, "song-id"},
 		{"a video without an artist matches by title and length", noArtistVideo("Searched Song", "3:42"), []youtube.MusicItem{song("song-id", "Searched Song", "", "3:42")}, "song-id"},
 		{"the closest length wins", video, []youtube.MusicItem{

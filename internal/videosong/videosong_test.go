@@ -1,7 +1,9 @@
 package videosong
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,6 +47,59 @@ func TestCacheBounds(t *testing.T) {
 	}
 	if _, ok := c.Get(fmt.Sprintf("video-%d", MaxEntries+9)); !ok {
 		t.Errorf("the newest entry was forgotten")
+	}
+}
+
+// TestACacheOfANewerMatcherKeepsItsSongs reads a file a newer build wrote:
+// this build cannot trust its no-song answers, but its song answers hold.
+func TestACacheOfANewerMatcherKeepsItsSongs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "video-songs.json")
+	data, err := json.Marshal(file{
+		Version: fileVersion + 1,
+		Entries: []entry{
+			{"video-1", youtube.MusicItem{VideoID: "song-1", Title: "Searched Song"}},
+			{"video-2", youtube.MusicItem{}}, // judged songless by a newer matcher
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := Open(path)
+	if song, ok := c.Get("video-1"); !ok || song.VideoID != "song-1" {
+		t.Errorf("video-1 came back %q (known %v), want song-1", song.VideoID, ok)
+	}
+	if _, ok := c.Get("video-2"); ok {
+		t.Errorf("a newer matcher's no-song answer was trusted")
+	}
+}
+
+// TestOldCacheKeepsItsSongsButNotItsNoSongAnswers reads a file an older
+// matcher wrote: its song answers hold, but a video it judged songless may
+// have one the current matcher finds, so those answers are dropped.
+func TestOldCacheKeepsItsSongsButNotItsNoSongAnswers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "video-songs.json")
+	legacy := []entry{
+		{"video-1", youtube.MusicItem{VideoID: "song-1", Title: "Searched Song"}},
+		{"video-2", youtube.MusicItem{}}, // judged songless by the old matcher
+	}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := Open(path)
+	if song, ok := c.Get("video-1"); !ok || song.VideoID != "song-1" {
+		t.Errorf("video-1 came back %q (known %v), want song-1", song.VideoID, ok)
+	}
+	if _, ok := c.Get("video-2"); ok {
+		t.Errorf("the old matcher's no-song answer survived")
 	}
 }
 

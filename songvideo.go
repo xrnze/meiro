@@ -95,9 +95,15 @@ func isSongKindName(name string) bool {
 	return false
 }
 
+// maxVideoIntro is how much longer than its song a music video may run and
+// still be the same track: an intro or an outro plays over the video, and
+// does not change the song.
+const maxVideoIntro = 30 * time.Second
+
 // bestSongFor is the song among songs that plays the same track as video:
 // one that folds to the same title, names the same artist, and is about as
-// long. The song whose length is closest to the video's wins.
+// long, allowing the video its intro and outro. The song whose length is
+// closest to the video's wins.
 func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.MusicItem, bool) {
 	title := songTitleFold(video.Title)
 	if title == "" {
@@ -112,8 +118,12 @@ func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.Mu
 		if song.VideoID == "" || song.VideoID == video.VideoID || songTitleFold(song.Title) != title {
 			continue
 		}
-		if length := parseDuration(song.Duration); videoLength > 0 && length > 0 && (videoLength-length).Abs() > sameSongTolerance {
-			continue
+		if length := parseDuration(song.Duration); videoLength > 0 && length > 0 {
+			// A video runs longer than its song by an intro or an outro,
+			// but a song longer than its video is a different edit.
+			if gap := videoLength - length; gap > maxVideoIntro || -gap > sameSongTolerance {
+				continue
+			}
 		}
 		if len(wantArtists) > 0 && !songArtistMatches(song, wantArtists) {
 			continue
