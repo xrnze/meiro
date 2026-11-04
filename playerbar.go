@@ -94,7 +94,7 @@ func (a *app) scrubber(c *ui.Context, exp *sliderExpand) {
 			thick = sliderThick
 		}
 		slider := m3.Slider(c, &a.scrub, 0, total, m3.SliderSpec{
-			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known, Thickness: thick,
+			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known, Thickness: thick, SlimTrack: true,
 		})
 		expanded := slider.Pressed()
 		if expanded != exp.scrub {
@@ -144,7 +144,7 @@ func (a *app) volumeSlider(c *ui.Context, vertical bool, exp *sliderExpand) ui.E
 	if exp.volume {
 		thick = sliderThick
 	}
-	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical, Thickness: thick})
+	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical, Thickness: thick, SlimTrack: true})
 	expanded := slider.Pressed()
 	if expanded != exp.volume {
 		exp.volume = expanded

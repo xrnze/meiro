@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **The player shows the volume as a number.** While the cursor is over or the focus is on the volume control, the current level reads, for example, 72, floating over the slider's thumb and following it as the value changes, in the player bar and in the full-screen player. The narrow bar's volume panel shows it over its slider too.
-- **The played part of a slider grows as you grab it.** Holding the scrubber or the volume slider thickens the played part of the track and its thumb, while the rest of the track and the hover stay slim, and they settle back on release.
+- **The thumb grows as you grab a slider.** Holding the scrubber or the volume slider grows its thumb, while the track and its fill stay slim, and it settles back on release.
 - **Pin playlists to the sidebar.** The menu of a playlist page pins it to the navigation rail, where its cover and name sit under the destinations above Settings. Clicking one opens the playlist, and the rail keeps it selected while the playlist is showing. Pinned playlists survive restarts, and the same menu unpins them. Deleting a playlist takes its pin off too, and a playlist's page keeps the pin's name and cover up to date when the playlist is renamed or gets a new cover.
 - **A music video plays its song.** When Meiro would play a track's music
   video, it plays the song version of the same track instead, as YouTube

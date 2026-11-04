@@ -51,6 +51,10 @@ type SliderSpec struct {
 	// Vertical stands the slider up: lo at the bottom, hi at the top. Draw
 	// expects a tall, narrow box, as an equaliser's band slider has.
 	Vertical bool
+	// SlimTrack draws both tracks at the slim 4 height whatever Thickness
+	// says, so Thickness sizes only the thumb: the player's sliders grow the
+	// thumb under the finger without a fatter fill.
+	SlimTrack bool
 	// Disabled greys the slider out.
 	Disabled bool
 }
@@ -121,15 +125,19 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 			gap = 4
 		}
 		radius := thick / 2
-		// The active track and the thumb grow with Thickness, the inactive
-		// track stays slim, as the Expressive slider does.
-		ithick, iradius := min(thick, 4), min(radius, 2)
+		// SlimTrack keeps both tracks slim whatever Thickness says, so
+		// Thickness sizes only the thumb, which is how the player's sliders
+		// grow the thumb under the finger without a fatter fill.
+		tthick, tradius := thick, radius
+		if spec.SlimTrack {
+			tthick, tradius = min(thick, 4), min(thick, 4)/2
+		}
 
 		if spec.Vertical {
 			cx := r.X + r.W/2
 			y0, y1 := r.Y+pad, r.Y+r.H-pad
 			hy := y1 - (y1-y0)*frac
-			p.Fill(ui.Rect{X: cx - ithick/2, Y: y0, W: ithick, H: y1 - y0}, inactive, iradius)
+			p.Fill(ui.Rect{X: cx - tthick/2, Y: y0, W: tthick, H: y1 - y0}, inactive, tradius)
 			// The active track fills from the middle of the range to the
 			// thumb: above the middle for a boost, below for a cut.
 			mid := y1
@@ -140,7 +148,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 				p.Fill(ui.Rect{X: cx - thick/2 - 9, Y: mid - 1, W: 6, H: 2}, handle, 1)
 			}
 			if span := max(mid, hy) - min(mid, hy); span > 1 {
-				p.Fill(ui.Rect{X: cx - thick/2, Y: min(mid, hy), W: thick, H: span}, active, radius)
+				p.Fill(ui.Rect{X: cx - tthick/2, Y: min(mid, hy), W: tthick, H: span}, active, tradius)
 			}
 			// The thumb, a circle on the track, a shade wider while held.
 			d := max(thick+10, 18)
@@ -173,7 +181,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 
 		// The inactive track, from the handle to the end.
 		if left := hx + gap + handleW/2; x1-left > 1 {
-			p.Fill(ui.Rect{X: left, Y: cy - ithick/2, W: x1 - left, H: ithick}, inactive, iradius)
+			p.Fill(ui.Rect{X: left, Y: cy - tthick/2, W: x1 - left, H: tthick}, inactive, tradius)
 			if x1-left > 14 && !spec.Wavy {
 				p.Fill(ui.Rect{X: x1 - 6, Y: cy - 2, W: 4, H: 4}, active, 2)
 			}
@@ -181,7 +189,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 		// The active track, from the start to the handle: flat, or a wave.
 		if end := hx - gap - handleW/2; end-x0 > 1 {
 			if amplitude < 0.05 {
-				p.Fill(ui.Rect{X: x0, Y: cy - thick/2, W: end - x0, H: thick}, active, radius)
+				p.Fill(ui.Rect{X: x0, Y: cy - tthick/2, W: end - x0, H: tthick}, active, tradius)
 			} else {
 				phase := float32(0)
 				if spec.Waving && !still {
@@ -204,12 +212,12 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 						path.LineTo(x, y)
 					}
 					if x >= end {
-						p.Fill(ui.Rect{X: x - radius, Y: y - radius, W: thick, H: thick}, active, radius)
+						p.Fill(ui.Rect{X: x - tradius, Y: y - tradius, W: tthick, H: tthick}, active, tradius)
 						break
 					}
 				}
-				p.StrokePath(&path, thick, active)
-				p.Fill(ui.Rect{X: x0 - radius, Y: cy - radius, W: thick, H: thick}, active, radius)
+				p.StrokePath(&path, tthick, active)
+				p.Fill(ui.Rect{X: x0 - tradius, Y: cy - tradius, W: tthick, H: tthick}, active, tradius)
 			}
 		}
 		// The handle.
