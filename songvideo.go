@@ -124,7 +124,8 @@ const maxVideoIntro = 30 * time.Second
 // bestSongFor is the song among songs that plays the same track as video:
 // one that folds to the same title, names the same artist, or names none,
 // and is about as long, allowing the video its intro and outro. The song
-// whose length is closest to the video's wins.
+// whose length is closest to the video's wins, and a song whose length is
+// known beats one that does not say.
 func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.MusicItem, bool) {
 	title := videoTitleFold(video.Title)
 	if title == "" {
@@ -134,6 +135,7 @@ func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.Mu
 	wantArtists := songArtistFolds(video)
 	var best youtube.MusicItem
 	var bestGap time.Duration
+	var bestKnown bool
 	found := false
 	for _, song := range songs {
 		if song.VideoID == "" || song.VideoID == video.VideoID || songTitleFold(song.Title) != title {
@@ -151,9 +153,14 @@ func bestSongFor(video youtube.MusicItem, songs []youtube.MusicItem) (youtube.Mu
 			// does, is judged by its title and length alone.
 			continue
 		}
-		gap := songLengthGap(videoLength, parseDuration(song.Duration))
-		if !found || gap < bestGap {
-			best, bestGap, found = song, gap, true
+		length := parseDuration(song.Duration)
+		known := videoLength > 0 && length > 0
+		gap := songLengthGap(videoLength, length)
+		// A candidate whose own length is known wins over one whose is not:
+		// an unknown length cannot show that the song is as long as the
+		// video, and re-uploads of the song are listed without one.
+		if !found || known && !bestKnown || known == bestKnown && gap < bestGap {
+			best, bestGap, bestKnown, found = song, gap, known, true
 		}
 	}
 	return best, found

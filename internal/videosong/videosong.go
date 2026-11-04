@@ -21,19 +21,19 @@ import (
 // dozen bytes, so this is well under a megabyte on disk.
 const MaxEntries = 5000
 
-// fileVersion names the matcher that judged the file's answers. A video an
-// older matcher found no song for may have one the current matcher finds,
-// so its no-song answers are dropped on read; a song answer it made holds
-// under any matcher.
-const fileVersion = 3
+// fileVersion names the matcher that judged the file's answers. The
+// answers of a matcher of any other version, its picks included, are
+// dropped on read: a song it picked may not be the one the current
+// matcher ranks first, and every video pays one lookup to be asked again.
+const fileVersion = 4
 
 type entry struct {
 	ID string `json:"id"`
 	youtube.MusicItem
 }
 
-// file is the cache on disk. The version names the matcher that judged the
-// answers; a file of an older version holds only song answers.
+// file is the cache on disk. The version names the matcher that judged
+// the answers; a file of any other version is not trusted.
 type file struct {
 	Version int     `json:"version"`
 	Entries []entry `json:"entries"`
@@ -69,28 +69,23 @@ func Open(path string) *Cache {
 	}
 	var saved file
 	if err := json.Unmarshal(data, &saved); err == nil {
-		for _, e := range saved.Entries {
-			// A file a newer matcher wrote: its song answers hold, but its
-			// no-song answers were judged by rules this build does not know.
-			if saved.Version == fileVersion || e.VideoID != "" {
+		if saved.Version == fileVersion {
+			for _, e := range saved.Entries {
 				c.putLocked(e.ID, e.MusicItem)
 			}
+		} else {
+			log.Printf("videosong: %s was written by matcher version %d, starting fresh", path, saved.Version)
 		}
 		return c
 	}
-	// A file an older matcher wrote. Its no-song answers are not trusted
-	// any more: the song the current matcher finds was ruled out by the
-	// shorter tolerance, and the answer was cached for good.
+	// A file the first matcher wrote, before versions: it holds answers
+	// this matcher did not judge, so nothing in it is trusted.
 	var entries []entry
 	if err := json.Unmarshal(data, &entries); err != nil {
 		log.Printf("videosong: %s is not readable, starting fresh: %v", path, err)
 		return c
 	}
-	for _, e := range entries {
-		if e.VideoID != "" {
-			c.putLocked(e.ID, e.MusicItem)
-		}
-	}
+	log.Printf("videosong: %s holds %d answers of the first matcher, starting fresh", path, len(entries))
 	return c
 }
 

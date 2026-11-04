@@ -413,6 +413,13 @@ func TestBestSongFor(t *testing.T) {
 			song("song-far", "Searched Song", "Someone", "3:45"),
 			song("song-near", "Searched Song", "Someone", "3:40"),
 		}, "song-near"},
+		{"a song without a length loses to one with", video, []youtube.MusicItem{
+			song("song-shady", "Searched Song", "Someone", ""),
+			song("song-known", "Searched Song", "", "3:23"),
+		}, "song-known"},
+		{"a song without a length wins when no other does", video, []youtube.MusicItem{
+			song("song-shady", "Searched Song", "Someone", ""),
+		}, "song-shady"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

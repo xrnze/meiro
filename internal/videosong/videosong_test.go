@@ -50,9 +50,9 @@ func TestCacheBounds(t *testing.T) {
 	}
 }
 
-// TestACacheOfANewerMatcherKeepsItsSongs reads a file a newer build wrote:
-// this build cannot trust its no-song answers, but its song answers hold.
-func TestACacheOfANewerMatcherKeepsItsSongs(t *testing.T) {
+// TestACacheOfANewerMatcherStartsFresh reads a file a newer build wrote:
+// this build did not judge its answers, so it trusts none of them.
+func TestACacheOfANewerMatcherStartsFresh(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "video-songs.json")
 	data, err := json.Marshal(file{
 		Version: fileVersion + 1,
@@ -69,22 +69,50 @@ func TestACacheOfANewerMatcherKeepsItsSongs(t *testing.T) {
 	}
 
 	c := Open(path)
-	if song, ok := c.Get("video-1"); !ok || song.VideoID != "song-1" {
-		t.Errorf("video-1 came back %q (known %v), want song-1", song.VideoID, ok)
+	if _, ok := c.Get("video-1"); ok {
+		t.Errorf("a newer matcher's song pick was trusted")
 	}
 	if _, ok := c.Get("video-2"); ok {
 		t.Errorf("a newer matcher's no-song answer was trusted")
 	}
 }
 
-// TestOldCacheKeepsItsSongsButNotItsNoSongAnswers reads a file an older
-// matcher wrote: its song answers hold, but a video it judged songless may
-// have one the current matcher finds, so those answers are dropped.
-func TestOldCacheKeepsItsSongsButNotItsNoSongAnswers(t *testing.T) {
+// TestCacheOfTheLastMatcherStartsFresh reads the format the build before
+// this one left on disk, a versioned file one version short: it holds the
+// answers most users have, and none of them are trusted.
+func TestCacheOfTheLastMatcherStartsFresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "video-songs.json")
+	data, err := json.Marshal(file{
+		Version: fileVersion - 1,
+		Entries: []entry{
+			{"video-1", youtube.MusicItem{VideoID: "song-1", Title: "Searched Song"}},
+			{"video-2", youtube.MusicItem{}}, // judged songless by the last matcher
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := Open(path)
+	if _, ok := c.Get("video-1"); ok {
+		t.Errorf("the last matcher's song pick was trusted")
+	}
+	if _, ok := c.Get("video-2"); ok {
+		t.Errorf("the last matcher's no-song answer was trusted")
+	}
+}
+
+// TestCacheOfAnotherMatcherStartsFresh reads a file a matcher of another
+// version wrote: its picks may not be the ones this matcher would make, so
+// nothing in it is trusted and every video is asked for again.
+func TestCacheOfAnotherMatcherStartsFresh(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "video-songs.json")
 	legacy := []entry{
 		{"video-1", youtube.MusicItem{VideoID: "song-1", Title: "Searched Song"}},
-		{"video-2", youtube.MusicItem{}}, // judged songless by the old matcher
+		{"video-2", youtube.MusicItem{}}, // judged songless by the other matcher
 	}
 	data, err := json.Marshal(legacy)
 	if err != nil {
@@ -95,11 +123,11 @@ func TestOldCacheKeepsItsSongsButNotItsNoSongAnswers(t *testing.T) {
 	}
 
 	c := Open(path)
-	if song, ok := c.Get("video-1"); !ok || song.VideoID != "song-1" {
-		t.Errorf("video-1 came back %q (known %v), want song-1", song.VideoID, ok)
+	if _, ok := c.Get("video-1"); ok {
+		t.Errorf("the other matcher's song pick was trusted")
 	}
 	if _, ok := c.Get("video-2"); ok {
-		t.Errorf("the old matcher's no-song answer survived")
+		t.Errorf("the other matcher's no-song answer was trusted")
 	}
 }
 
