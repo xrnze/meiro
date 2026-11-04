@@ -564,7 +564,13 @@ func (p *Player) Failure() string {
 		return ""
 	}
 	if message == "" {
-		message = "ffmpeg stopped"
+		// ffmpeg dies without a word when a build crashes on its own, as a
+		// static binary that segfaults in its TLS code does; say so.
+		if s.waitErr != nil {
+			message = "ffmpeg crashed: " + s.waitErr.Error()
+		} else {
+			message = "ffmpeg stopped"
+		}
 	}
 	return message
 }
