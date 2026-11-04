@@ -11,6 +11,9 @@ type NavItem struct {
 	// Icon is drawn while the destination is idle, Selected while it is
 	// chosen: Material fills the icon of the current destination.
 	Icon, Selected *ui.SVG
+	// Thumb, when set, draws as the destination's icon: the round artwork of
+	// a pinned playlist. It wins over Icon.
+	Thumb *ui.Bitmap
 	// Hint, when set, is shown over the destination's icon as the key that
 	// opens it.
 	Hint []KeyPart
@@ -41,6 +44,7 @@ const railFadeGain = 3
 // RailSpec describes a navigation rail.
 type RailSpec struct {
 	Items    []NavItem
+	Pinned   []NavItem // playlists pinned under the divider, above the footer
 	Footer   []NavItem // destinations pinned to the bottom
 	Selected string
 	Expanded bool
@@ -92,6 +96,16 @@ func Rail(c *ui.Context, spec RailSpec) RailEvent {
 		for _, item := range spec.Items {
 			if navItem(c, item, item.ID == spec.Selected, expanded, fade, railWidth) {
 				event.Item = item.ID
+			}
+		}
+		if len(spec.Pinned) > 0 {
+			ui.Box(c).Height(8)
+			ui.Divider(c).Margin(0, railInset, 0, railInset)
+			ui.Box(c).Height(8)
+			for _, item := range spec.Pinned {
+				if navItem(c, item, item.ID == spec.Selected, expanded, fade, railWidth) {
+					event.Item = item.ID
+				}
 			}
 		}
 		ui.Spacer(c)
@@ -170,7 +184,11 @@ func navItem(c *ui.Context, item NavItem, selected, expanded bool, fade, railWid
 		focusRing(c, b, pill, Full)
 		pill.PaddingX(railIconInset).Gap(8)
 		pill.Children(func() {
-			ui.Icon(c, icon).FontSize(24).TextColor(iconColor).Shrink(0)
+			if item.Thumb != nil {
+				ui.Image(c, item.Thumb).Size(24, 24).Radius(Full).Fit(ui.Cover).Shrink(0)
+			} else {
+				ui.Icon(c, icon).FontSize(24).TextColor(iconColor).Shrink(0)
+			}
 		})
 		expandedLabelLeft := railInset + railIconInset + 24 + 8
 		if expanded {

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Pin playlists to the sidebar.** The menu of a playlist page pins it to the navigation rail, where its cover and name sit under the destinations above Settings. Clicking one opens the playlist, and the rail keeps it selected while the playlist is showing. Pinned playlists survive restarts, and the same menu unpins them.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Fixed

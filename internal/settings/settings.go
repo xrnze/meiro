@@ -121,6 +121,16 @@ type Settings struct {
 	// everything else does, 1 or 0 for their own pace.
 	PodcastSpeed float64 `json:"podcastSpeed,omitempty"`
 	MusicSpeed   float64 `json:"musicSpeed,omitempty"`
+	// PinnedPlaylists are the playlists pinned to the navigation rail, in pin
+	// order, with the heading the rail shows before a page loads.
+	PinnedPlaylists []PinnedPlaylist `json:"pinnedPlaylists,omitempty"`
+}
+
+// PinnedPlaylist is a playlist pinned to the navigation rail.
+type PinnedPlaylist struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Art   string `json:"art,omitempty"`
 }
 
 // TrayMark names one of the menu bar icon styles.
@@ -185,6 +195,7 @@ func (s *Settings) clone() Settings {
 	c := *s
 	c.Recent = slices.Clone(s.Recent)
 	c.Shortcuts = maps.Clone(s.Shortcuts)
+	c.PinnedPlaylists = slices.Clone(s.PinnedPlaylists)
 	return c
 }
 
@@ -308,6 +319,16 @@ func Parse(data []byte) (Settings, error) {
 		read.NotifyTrack, read.ShowTray = false, false
 	}
 	read.CrossfadeSeconds = ClampCrossfade(read.CrossfadeSeconds)
+	// A pin needs a page to open: drop entries without an ID, and one per ID
+	// since the rail keys every entry by its page.
+	seen := make(map[string]bool, len(read.PinnedPlaylists))
+	read.PinnedPlaylists = slices.DeleteFunc(read.PinnedPlaylists, func(p PinnedPlaylist) bool {
+		if p.ID == "" || seen[p.ID] {
+			return true
+		}
+		seen[p.ID] = true
+		return false
+	})
 	return read, nil
 }
 

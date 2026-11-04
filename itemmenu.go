@@ -263,6 +263,15 @@ func (a *app) heroMenu(c *ui.Context, anchor ui.Element) {
 			c.Toast("Link copied")
 			close()
 		}
+		if r.id == routePlaylist && a.playlistPinned(id) {
+			if m3.MenuItem(c, "Unpin from sidebar", m3.IconPushPin).Clicked() {
+				a.setPinned(id, false, "", "")
+				close()
+			}
+		} else if r.id == routePlaylist && m3.MenuItem(c, "Pin to sidebar", m3.IconPushPin).Clicked() {
+			a.setPinned(id, true, a.page.detail.title, a.page.detail.art)
+			close()
+		}
 		if r.id == routePlaylist && m3.MenuItem(c, "Delete playlist", m3.IconDelete).Clicked() {
 			a.askDeletePlaylist(id, a.page.detail.title)
 			close()
