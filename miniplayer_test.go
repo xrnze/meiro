@@ -145,9 +145,9 @@ func TestVolumeReadoutShowsTheValueOnHover(t *testing.T) {
 	}
 }
 
-// The volume and position sliders grow a thicker track and thumb while the
-// user hovers them, and settle back when they leave.
-func TestSlidersThickenOnHover(t *testing.T) {
+// The volume and position sliders grow a thicker track and thumb only while
+// the user holds them down, not on a mere hover, and settle back on release.
+func TestSlidersThickenWhileHeld(t *testing.T) {
 	a, _ := playbackApp(t)
 	q := tracks("a")
 	for i := range q {
@@ -166,13 +166,18 @@ func TestSlidersThickenOnHover(t *testing.T) {
 	}
 	tt.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
 	tt.Frame()
-	if !a.nowPlaying.miniExpand.volume {
-		t.Fatalf("hovering the volume slider did not thicken it: %q", tt.Texts())
+	if a.nowPlaying.miniExpand.volume {
+		t.Fatal("hovering the volume slider thickened it")
 	}
-	tt.Move(0, 0)
+	tt.Press(vol.X+vol.W/2, vol.Y+vol.H/2)
+	tt.Frame()
+	if !a.nowPlaying.miniExpand.volume {
+		t.Fatalf("holding the volume slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Release(vol.X+vol.W/2, vol.Y+vol.H/2)
 	tt.Frame()
 	if a.nowPlaying.miniExpand.volume {
-		t.Fatal("leaving the volume slider kept it thick")
+		t.Fatal("releasing the volume slider kept it thick")
 	}
 	scrub, ok := tt.Find("Position")
 	if !ok {
@@ -183,19 +188,24 @@ func TestSlidersThickenOnHover(t *testing.T) {
 	}
 	tt.Move(scrub.X+scrub.W/2, scrub.Y+scrub.H/2)
 	tt.Frame()
-	if !a.nowPlaying.miniExpand.scrub {
-		t.Fatalf("hovering the position slider did not thicken it: %q", tt.Texts())
+	if a.nowPlaying.miniExpand.scrub {
+		t.Fatal("hovering the position slider thickened it")
 	}
-	tt.Move(0, 0)
+	tt.Press(scrub.X+scrub.W/2, scrub.Y+scrub.H/2)
+	tt.Frame()
+	if !a.nowPlaying.miniExpand.scrub {
+		t.Fatalf("holding the position slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Release(scrub.X+scrub.W/2, scrub.Y+scrub.H/2)
 	tt.Frame()
 	if a.nowPlaying.miniExpand.scrub {
-		t.Fatal("leaving the position slider kept it thick")
+		t.Fatal("releasing the position slider kept it thick")
 	}
 }
 
-// The main window and the mini player build concurrently, so hovering a
+// The main window and the mini player build concurrently, so holding a
 // slider in one must not thicken the sliders in the other.
-func TestMiniHoverLeavesTheMainSlidersAlone(t *testing.T) {
+func TestMiniHoldingLeavesTheMainSlidersAlone(t *testing.T) {
 	a, _ := playbackApp(t)
 	q := tracks("a")
 	for i := range q {
@@ -211,26 +221,27 @@ func TestMiniHoverLeavesTheMainSlidersAlone(t *testing.T) {
 		t.Fatal("no volume slider in the mini player")
 	}
 	mini.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
+	mini.Press(vol.X+vol.W/2, vol.Y+vol.H/2)
 	mini.Frame()
 	if !a.nowPlaying.miniExpand.volume {
-		t.Fatal("hovering the mini volume slider did not thicken it")
+		t.Fatal("holding the mini volume slider did not thicken it")
 	}
 	if a.nowPlaying.expand.volume {
-		t.Fatal("the mini hover thickened the main window's volume slider")
+		t.Fatal("the mini press thickened the main window's volume slider")
 	}
 	main.Frame()
 	if !a.nowPlaying.miniExpand.volume {
-		t.Fatal("the main window's frame cleared the mini player's hover")
+		t.Fatal("the main window's frame cleared the mini player's hold")
 	}
-	mini.Move(0, 0)
+	mini.Release(vol.X+vol.W/2, vol.Y+vol.H/2)
 	mini.Frame()
 	if a.nowPlaying.miniExpand != (sliderExpand{}) {
-		t.Fatalf("leaving the mini slider kept it thick: %+v", a.nowPlaying.miniExpand)
+		t.Fatalf("releasing the mini slider kept it thick: %+v", a.nowPlaying.miniExpand)
 	}
 }
 
-// The main window's own sliders thicken on hover like the mini player's.
-func TestMainSlidersThickenOnHover(t *testing.T) {
+// The main window's own sliders thicken while held, like the mini player's.
+func TestMainSlidersThickenWhileHeld(t *testing.T) {
 	a, _ := playbackApp(t)
 	q := tracks("a")
 	for i := range q {
@@ -249,13 +260,18 @@ func TestMainSlidersThickenOnHover(t *testing.T) {
 	}
 	tt.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
 	tt.Frame()
-	if !a.nowPlaying.expand.volume {
-		t.Fatalf("hovering the volume slider did not thicken it: %q", tt.Texts())
+	if a.nowPlaying.expand.volume {
+		t.Fatal("hovering the volume slider thickened it")
 	}
-	tt.Move(0, 0)
+	tt.Press(vol.X+vol.W/2, vol.Y+vol.H/2)
+	tt.Frame()
+	if !a.nowPlaying.expand.volume {
+		t.Fatalf("holding the volume slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Release(vol.X+vol.W/2, vol.Y+vol.H/2)
 	tt.Frame()
 	if a.nowPlaying.expand.volume {
-		t.Fatal("leaving the volume slider kept it thick")
+		t.Fatal("releasing the volume slider kept it thick")
 	}
 }
 

@@ -96,7 +96,7 @@ func (a *app) scrubber(c *ui.Context, exp *sliderExpand) {
 		slider := m3.Slider(c, &a.scrub, 0, total, m3.SliderSpec{
 			Label: "Position", Key: "scrubber", Wavy: true, Waving: a.player.Playing(), Disabled: !known, Thickness: thick,
 		})
-		expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+		expanded := slider.Pressed()
 		if expanded != exp.scrub {
 			exp.scrub = expanded
 			c.Invalidate()
@@ -145,7 +145,7 @@ func (a *app) volumeSlider(c *ui.Context, vertical bool, exp *sliderExpand) ui.E
 		thick = sliderThick
 	}
 	slider := m3.Slider(c, &v, 0, 100, m3.SliderSpec{Label: "Volume", Key: "volume", Vertical: vertical, Thickness: thick})
-	expanded := slider.Hovered() || slider.FocusVisible() || slider.Pressed()
+	expanded := slider.Pressed()
 	if expanded != exp.volume {
 		exp.volume = expanded
 		c.Invalidate()
@@ -175,7 +175,7 @@ func (a *app) volumeReadout(c *ui.Context, anchor ui.Element, show bool) {
 	open := show
 	ui.PopoverBase(c, anchor, &open, func(panel ui.Element) {
 		panel.Key("volume-readout").Padding(2, 7).Radius(m3.Small).Background(sc.SurfaceContainerHigh).
-			AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorBottomLeft).Margin(0, 0, 6, 0)
+			AttachTo(anchor, ui.AnchorTop, ui.AnchorBottom).Margin(0, 0, 6, 0)
 		m3.Elevation(c, panel, 2)
 		m3.LabelMedium.Style(ui.Text(c, strconv.Itoa(int(a.volume))), false).TextColor(sc.OnSurface)
 	})
@@ -185,19 +185,26 @@ func (a *app) volumeReadout(c *ui.Context, anchor ui.Element, show bool) {
 func (a *app) volumeControl(c *ui.Context, sliderWidth float32, exp *sliderExpand) {
 	a.nowPlaying.volumePopup = false
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
-		var anchor, slider ui.Element
+		var anchor, slider, mark ui.Element
 		a.hinted(c, func() { anchor = a.muteButton(c) }, keymap.Mute)
 		if sliderWidth > 0 {
 			a.hinted(c, func() {
 				ui.Row(c).Width(sliderWidth).Children(func() {
 					slider = a.volumeSlider(c, false, exp)
+					// A zero-size mark where the thumb sits: the readout
+					// anchors to it, so the number floats over the thumb and
+					// follows it as the value changes.
+					const pad float32 = 10
+					frac := float32(min(max(a.volume/100, 0), 1))
+					mark = ui.Box(c.Key("volume-thumb")).Absolute().
+						Left(pad+(sliderWidth-2*pad)*frac).Size(0, 0)
 				})
 			}, keymap.VolumeUp, keymap.VolumeDown)
 		}
 		// The readout lines up with the slider, not the mute button beside it.
 		readout := anchor
 		if sliderWidth > 0 {
-			readout = slider
+			readout = mark
 		}
 		a.volumeReadout(c, readout, anchor.Hovered() || anchor.FocusVisible() || slider.Hovered() || slider.FocusVisible())
 	})

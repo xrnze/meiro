@@ -93,7 +93,9 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 	}
 	frac = min(max(frac, 0), 1)
 	pressed := s.Pressed()
-	handleW := Animate(s, "handle", pick(pressed, float32(2), 4), SpatialFast)
+	// The handle holds its width while held: it used to narrow, which read
+	// as the thumb shrinking under the finger.
+	handleW := float32(4)
 	amplitude := float32(0)
 	if spec.Wavy {
 		amplitude = Animate(s, "wave", pick(spec.Waving, float32(2.4), 0), SpatialDefault)
