@@ -115,10 +115,22 @@ func (a *app) rail(c *ui.Context, bar ui.TitleBar) {
 			items = append(items, item)
 		}
 	}
-	r, _ := a.route()
+	var pinned []m3.NavItem
+	for _, p := range a.settings.PinnedPlaylists {
+		item := m3.NavItem{ID: routeByID(routePlaylist).path(p.ID), Label: p.Title, Icon: m3.IconQueue, Selected: m3.IconQueue}
+		if p.Art != "" {
+			item.Thumb = a.thumbs.Bitmap(p.Art, a.artPixels(128, 24))
+		}
+		pinned = append(pinned, item)
+	}
+	r, id := a.route()
 	selected := ""
 	if r.nav != routeNotFound {
 		selected = navID(r.nav)
+	} else if r.id == routePlaylist {
+		// A pinned playlist's rail entry is the playlist page itself, so it
+		// is the selected destination while that page shows.
+		selected = routeByID(routePlaylist).path(id)
 	}
 	// Only controls on the left (the traffic lights) sit over the rail.
 	topInset := float32(0)
@@ -127,6 +139,7 @@ func (a *app) rail(c *ui.Context, bar ui.TitleBar) {
 	}
 	event := m3.Rail(c, m3.RailSpec{
 		Items:    items,
+		Pinned:   pinned,
 		Footer:   footer,
 		Selected: selected,
 		Expanded: a.settings.RailExpanded,
