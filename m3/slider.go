@@ -119,12 +119,15 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 			gap = 4
 		}
 		radius := thick / 2
+		// The active track and the thumb grow with Thickness, the inactive
+		// track stays slim, as the Expressive slider does.
+		ithick, iradius := min(thick, 4), min(radius, 2)
 
 		if spec.Vertical {
 			cx := r.X + r.W/2
 			y0, y1 := r.Y+pad, r.Y+r.H-pad
 			hy := y1 - (y1-y0)*frac
-			p.Fill(ui.Rect{X: cx - thick/2, Y: y0, W: thick, H: y1 - y0}, inactive, radius)
+			p.Fill(ui.Rect{X: cx - ithick/2, Y: y0, W: ithick, H: y1 - y0}, inactive, iradius)
 			// The active track fills from the middle of the range to the
 			// thumb: above the middle for a boost, below for a cut.
 			mid := y1
@@ -168,7 +171,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, spec SliderSpec) ui.E
 
 		// The inactive track, from the handle to the end.
 		if left := hx + gap + handleW/2; x1-left > 1 {
-			p.Fill(ui.Rect{X: left, Y: cy - thick/2, W: x1 - left, H: thick}, inactive, radius)
+			p.Fill(ui.Rect{X: left, Y: cy - ithick/2, W: x1 - left, H: ithick}, inactive, iradius)
 			if x1-left > 14 && !spec.Wavy {
 				p.Fill(ui.Rect{X: x1 - 6, Y: cy - 2, W: 4, H: 4}, active, 2)
 			}

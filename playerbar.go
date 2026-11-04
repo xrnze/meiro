@@ -194,7 +194,12 @@ func (a *app) volumeControl(c *ui.Context, sliderWidth float32, exp *sliderExpan
 				})
 			}, keymap.VolumeUp, keymap.VolumeDown)
 		}
-		a.volumeReadout(c, anchor, anchor.Hovered() || anchor.FocusVisible() || slider.Hovered() || slider.FocusVisible())
+		// The readout lines up with the slider, not the mute button beside it.
+		readout := anchor
+		if sliderWidth > 0 {
+			readout = slider
+		}
+		a.volumeReadout(c, readout, anchor.Hovered() || anchor.FocusVisible() || slider.Hovered() || slider.FocusVisible())
 	})
 }
 
