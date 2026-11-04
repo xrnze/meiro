@@ -161,35 +161,101 @@ func TestSlidersThickenOnHover(t *testing.T) {
 	if !ok {
 		t.Fatal("no volume slider in the player")
 	}
-	if a.nowPlaying.volumeExpanded {
+	if a.nowPlaying.miniExpand.volume {
 		t.Fatal("the volume slider starts thick")
 	}
 	tt.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
 	tt.Frame()
-	if !a.nowPlaying.volumeExpanded {
+	if !a.nowPlaying.miniExpand.volume {
 		t.Fatalf("hovering the volume slider did not thicken it: %q", tt.Texts())
 	}
 	tt.Move(0, 0)
 	tt.Frame()
-	if a.nowPlaying.volumeExpanded {
+	if a.nowPlaying.miniExpand.volume {
 		t.Fatal("leaving the volume slider kept it thick")
 	}
 	scrub, ok := tt.Find("Position")
 	if !ok {
 		t.Fatal("no position slider in the player")
 	}
-	if a.nowPlaying.scrubExpanded {
+	if a.nowPlaying.miniExpand.scrub {
 		t.Fatal("the position slider starts thick")
 	}
 	tt.Move(scrub.X+scrub.W/2, scrub.Y+scrub.H/2)
 	tt.Frame()
-	if !a.nowPlaying.scrubExpanded {
+	if !a.nowPlaying.miniExpand.scrub {
 		t.Fatalf("hovering the position slider did not thicken it: %q", tt.Texts())
 	}
 	tt.Move(0, 0)
 	tt.Frame()
-	if a.nowPlaying.scrubExpanded {
+	if a.nowPlaying.miniExpand.scrub {
 		t.Fatal("leaving the position slider kept it thick")
+	}
+}
+
+// The main window and the mini player build concurrently, so hovering a
+// slider in one must not thicken the sliders in the other.
+func TestMiniHoverLeavesTheMainSlidersAlone(t *testing.T) {
+	a, _ := playbackApp(t)
+	q := tracks("a")
+	for i := range q {
+		q[i].Duration = "0:50"
+	}
+	a.queue.restore(playstate.State{Items: q, Index: 0, RecStart: -1})
+	a.current, a.total, a.resumeID = q[0], 50*time.Second, "a"
+	main := ui.NewTester(a.view, 1000, 700)
+	mini := ui.NewTester(a.miniPlayer, miniWidth, miniHeight)
+	main.Frame()
+	vol, ok := mini.Find("Volume")
+	if !ok {
+		t.Fatal("no volume slider in the mini player")
+	}
+	mini.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
+	mini.Frame()
+	if !a.nowPlaying.miniExpand.volume {
+		t.Fatal("hovering the mini volume slider did not thicken it")
+	}
+	if a.nowPlaying.expand.volume {
+		t.Fatal("the mini hover thickened the main window's volume slider")
+	}
+	main.Frame()
+	if !a.nowPlaying.miniExpand.volume {
+		t.Fatal("the main window's frame cleared the mini player's hover")
+	}
+	mini.Move(0, 0)
+	mini.Frame()
+	if a.nowPlaying.miniExpand != (sliderExpand{}) {
+		t.Fatalf("leaving the mini slider kept it thick: %+v", a.nowPlaying.miniExpand)
+	}
+}
+
+// The main window's own sliders thicken on hover like the mini player's.
+func TestMainSlidersThickenOnHover(t *testing.T) {
+	a, _ := playbackApp(t)
+	q := tracks("a")
+	for i := range q {
+		q[i].Duration = "0:50"
+	}
+	a.queue.restore(playstate.State{Items: q, Index: 0, RecStart: -1})
+	a.current, a.total, a.resumeID = q[0], 50*time.Second, "a"
+	tt := ui.NewTester(a.view, 1440, 900)
+	tt.Frame()
+	vol, ok := tt.Find("Volume")
+	if !ok {
+		t.Fatal("no volume slider in the player bar")
+	}
+	if a.nowPlaying.expand.volume {
+		t.Fatal("the volume slider starts thick")
+	}
+	tt.Move(vol.X+vol.W/2, vol.Y+vol.H/2)
+	tt.Frame()
+	if !a.nowPlaying.expand.volume {
+		t.Fatalf("hovering the volume slider did not thicken it: %q", tt.Texts())
+	}
+	tt.Move(0, 0)
+	tt.Frame()
+	if a.nowPlaying.expand.volume {
+		t.Fatal("leaving the volume slider kept it thick")
 	}
 }
 

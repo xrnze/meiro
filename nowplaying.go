@@ -55,15 +55,20 @@ type nowPlayingState struct {
 	// panel open while the pointer is on it.
 	volumeHeld  bool
 	volumePopup bool
-	// volumeExpanded and scrubExpanded thicken the volume and position
-	// sliders while either is hovered, focused or held.
-	volumeExpanded bool
-	scrubExpanded  bool
-	lyrics         lyricsState
-	lyricsScroll   ui.ScrollState
-	details        detailsState
-	related        relatedState
-	relatedList    ui.ListState
+	// expand and miniExpand thicken the volume and position sliders while
+	// either is hovered, focused or held, in the main window and in the
+	// tray's mini player. Their windows build concurrently, so each keeps
+	// its own state and a build cannot flip the other's sliders. Within
+	// the main window the bar and the full-screen player share one state:
+	// they are exclusive, apart from the closing animation that draws both
+	// for a frame, where a shared thickness is harmless.
+	expand       sliderExpand
+	miniExpand   sliderExpand
+	lyrics       lyricsState
+	lyricsScroll ui.ScrollState
+	details      detailsState
+	related      relatedState
+	relatedList  ui.ListState
 	// miniOpen is whether the tray's mini player shows. Its side panel then
 	// loads what its tab shows, as the full-screen player's does.
 	miniOpen bool
@@ -72,6 +77,13 @@ type nowPlayingState struct {
 	// the row that leads to them.
 	speedMenu    string
 	speedChoices bool
+}
+
+// sliderExpand is the hover state of one window's sliders: whether the
+// volume and position sliders show thick.
+type sliderExpand struct {
+	volume bool
+	scrub  bool
 }
 
 // relatedState is the related songs of the track playing.
@@ -258,12 +270,12 @@ func (a *app) nowPlayingMain(c *ui.Context, windowHeight float32) {
 			a.likeButton(c)
 			a.dislikeButton(c)
 		})
-		a.scrubber(c)
+		a.scrubber(c, &a.nowPlaying.expand)
 		ui.Row(c).Justify(ui.Center).Children(func() {
 			a.transport(c, 72, 10)
 		})
 		ui.Row(c).Justify(ui.Center).AlignItems(ui.Center).Gap(8).Children(func() {
-			a.volumeControl(c, 200)
+			a.volumeControl(c, 200, &a.nowPlaying.expand)
 			a.speedButton(c, "np-speed")
 		})
 	}
