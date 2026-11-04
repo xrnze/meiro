@@ -13,7 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Music Premium members hear it: the queue, the cover and the title come
   from the song, and a video with no song version plays itself as before.
   Videos added to the queue while their song is still being found join it
-  right away, and each turns into its song when the answer lands.
+  right away, and each turns into its song when the answer lands. Last.fm
+  hears of the song too: the play being scrobbled becomes the song's title
+  and artist when the answer lands, not the video's.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Fixed

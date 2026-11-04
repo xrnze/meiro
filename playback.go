@@ -63,6 +63,10 @@ type playback struct {
 	songCheck task
 	queueSong task
 	preSong   task
+	// preSongFailed is the video whose song lookup failed while it was the
+	// track that follows, which is not asked for again until another track
+	// follows.
+	preSongFailed string
 	// notificationArtwork loads the current cover before showing its track
 	// notification on Windows.
 	notificationArtwork task
@@ -375,7 +379,7 @@ func (a *app) trackNotices() trackNotices {
 }
 
 // starting reports whether a chosen track is being checked or resolved.
-func (a *app) starting() bool { return a.aiCheck.busy() || a.stream.busy() }
+func (a *app) starting() bool { return a.aiCheck.busy() || a.stream.busy() || a.songCheck.busy() }
 
 // loading includes ffmpeg opening the audio after the checks and resolution.
 func (a *app) loading() bool { return a.starting() || a.player.Buffering() }

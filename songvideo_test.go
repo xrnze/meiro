@@ -268,6 +268,100 @@ func TestAddingAVideoToAPlaylistAddsItsSong(t *testing.T) {
 	}
 }
 
+// TestASwapRebuildsThePendingListen checks that the play being followed
+// becomes the song's when the song lands: the listen was built from the
+// video's raw title before the song was known, and a scrobble of the video's
+// title would carry it to Last.fm.
+func TestASwapRebuildsThePendingListen(t *testing.T) {
+	a, _, _ := scrobbleApp(t)
+	hold := deferredRunner(a)
+	video := videoOf("Searched Song (Official Music Video)", "video-1", "3:42")
+
+	a.play(video, []youtube.MusicItem{video})
+	if l := a.scrobble.listen; l == nil || l.Track.Title != "Searched Song (Official Music Video)" {
+		t.Fatalf("the play is followed as %+v, want the video's raw title", l)
+	}
+	hold()
+	if a.current.VideoID != "song-id" {
+		t.Fatalf("the video played as %q, want its song", a.current.VideoID)
+	}
+	if l := a.scrobble.listen; l.Track.Title != "Searched Song" || l.Track.Artist != "Someone" {
+		t.Errorf("the play is followed as %q by %q, want the song's", l.Track.Title, l.Track.Artist)
+	}
+}
+
+// TestSubtitleLead is the table of what a subtitle leads with: an artist to
+// search for, or one of the kinds and tallies that name nothing to search
+// for.
+func TestSubtitleLead(t *testing.T) {
+	tests := []struct {
+		name     string
+		subtitle string
+		want     string
+	}{
+		{"an artist", "Someone • 3:42", "Someone"},
+		{"the kind of the row", "Song • 3:42", ""},
+		{"a length", "3:42", ""},
+		{"a view count", "1.4M views • 3 years ago", ""},
+		{"a like count", "123K likes", ""},
+		{"a listener count", "1K listeners • 2020", ""},
+		{"a subscriber count", "1M suscriptores • 2020", ""},
+		{"an artist whose name ends in a tally word", "Views • 3:42", "Views"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := subtitleLead(youtube.MusicItem{Subtitle: tt.subtitle}); got != tt.want {
+				t.Errorf("subtitleLead(%q) = %q, want %q", tt.subtitle, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAPreSongThatFailsIsNotAskedForAgain checks that a song lookup that
+// fails for the track that follows is not restarted on every poll: YouTube
+// staying down would keep the search busy forever. The video keeps its
+// place, and plays as itself when its turn comes.
+func TestAPreSongThatFailsIsNotAskedForAgain(t *testing.T) {
+	a, _ := playbackApp(t)
+	searches.Store(0)
+	base := tracks("a")
+	video := videoOf("Searched Song", "video-1", "3:42")
+	a.play(base[0], []youtube.MusicItem{base[0], video})
+	if !a.player.Playing() {
+		t.Skip("this environment has no audio device; the preload path needs a playing track")
+	}
+	// Bring the current track near its end so what follows is preloaded now.
+	a.total = a.player.Position() + 10*time.Second
+	refuseSearches.Store(true)
+	defer refuseSearches.Store(false)
+
+	a.syncPreload()
+	if got := searches.Load(); got != 1 {
+		t.Fatalf("%d searches for the first attempt, want 1", got)
+	}
+	if a.preSongFailed != "video-1" {
+		t.Fatalf("the failed lookup left %q behind, want video-1", a.preSongFailed)
+	}
+	a.syncPreload()
+	a.syncPreload()
+	if got := searches.Load(); got != 1 {
+		t.Errorf("%d searches after more polls, want 1: the failed video is not asked for again", got)
+	}
+
+	// Another video takes the failed one's place in the queue, and its own
+	// lookup fails too, so it still follows as a video: it is asked for.
+	a.queue.remove(1)
+	a.enqueue(videoOf("Searched Song", "video-2", "3:42"), false)
+	a.syncPreload()
+	if a.preSongFailed != "video-2" {
+		t.Fatalf("the failed lookup left %q behind, want video-2", a.preSongFailed)
+	}
+	a.syncPreload()
+	if got := searches.Load(); got != 3 {
+		t.Errorf("%d searches in all, want 3: the second video was asked for once", got)
+	}
+}
+
 // TestBestSongFor is the matching table: which search result is taken for a
 // video's song version, by title, artist and length.
 func TestBestSongFor(t *testing.T) {

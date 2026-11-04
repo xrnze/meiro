@@ -63,10 +63,26 @@ func songQueryArtist(video youtube.MusicItem) string {
 // such as "Song", or with a length, as it does in a row that names no artist.
 func subtitleLead(item youtube.MusicItem) string {
 	lead := strings.TrimSpace(strings.SplitN(item.Subtitle, "•", 2)[0])
-	if isSongKindName(lead) || parseDuration(lead) > 0 {
+	if isSongKindName(lead) || parseDuration(lead) > 0 || isCountPhrase(lead) {
 		return ""
 	}
 	return lead
+}
+
+// isCountPhrase reports whether a name ends in a tally, as "1.4M views"
+// does: it counts the video, not the artist. A tally leads with its
+// number, so a name of one word, as an artist called Views would be, is
+// still a name.
+func isCountPhrase(name string) bool {
+	if strings.IndexByte(name, ' ') < 0 {
+		return false
+	}
+	last := name[strings.LastIndexByte(name, ' ')+1:]
+	switch strings.ToLower(last) {
+	case "views", "listeners", "likes", "subscribers", "suscriptores":
+		return true
+	}
+	return false
 }
 
 // isSongKindName reports whether a subtitle leads with the kind of the row
@@ -199,6 +215,12 @@ func (a *app) swapToSong(videoID string, song youtube.MusicItem) {
 	a.queue.songOf(videoID, song)
 	if a.current.VideoID == videoID {
 		a.current = song
+		// The play being followed was built from the video's raw title,
+		// before the song was known; the song is what Last.fm should hear
+		// of now.
+		if l := a.scrobble.listen; l != nil {
+			l.Track = scrobbleTrack(a.withKnownCredits(song))
+		}
 	}
 	// A video the listener queued keeps its chosen mark under the song that
 	// plays in its place.

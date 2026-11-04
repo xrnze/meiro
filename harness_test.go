@@ -53,6 +53,9 @@ var (
 	// subscribeWrites counts the subscription writes, refused the same way.
 	subscribeWrites atomic.Int32
 	refuseWrites    atomic.Bool
+	// refuseSearches makes the fake answer every search with a 500, as
+	// YouTube does when it cannot be asked at all.
+	refuseSearches atomic.Bool
 	// aiChecks counts the player-page lookups for AI labels.
 	aiChecks atomic.Int32
 	// duplicateWrites makes the fake answer an add to a playlist the way
@@ -101,6 +104,9 @@ func (fakeMusic) RoundTrip(request *http.Request) (*http.Response, error) {
 	status := http.StatusOK
 	webNext := request.Header.Get("X-YouTube-Client-Name") == "1" && strings.HasSuffix(request.URL.Path, "/next")
 	switch {
+	case refuseSearches.Load() && strings.HasSuffix(request.URL.Path, "/search"):
+		searches.Add(1)
+		status = http.StatusInternalServerError
 	case webNext:
 		aiChecks.Add(1)
 		reply = webNextResponse(nextVideoID(asked))
@@ -229,7 +235,8 @@ func (fakeMusic) RoundTrip(request *http.Request) (*http.Response, error) {
 		searches.Add(1)
 		searchAsked.Store(asked)
 		reply = searchEpisodeResponse
-	case strings.Contains(asked, `"query":"Searched Song Someone"`):
+	case strings.Contains(asked, `"query":"Searched Song Someone"`),
+		strings.Contains(asked, `"query":"Searched Song (Official Music Video) Someone"`):
 		searches.Add(1)
 		reply = songSearchResponse("song-id", "Searched Song", "Someone", "3:42")
 	case strings.Contains(asked, `"query":"Duration Song Someone"`):
@@ -860,12 +867,14 @@ const searchFilteredResponse = `{"contents":{"tabbedSearchResultsRenderer":{"tab
 // track the query asked for. The song row names the artist and length next to
 // the title, as a search row does.
 func songSearchResponse(videoID, title, artists, duration string) string {
+	// The byline links the artist, as YouTube Music's search rows do, so the
+	// song credits it.
 	return `{"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[
 		{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{
 			"playlistItemData":{"videoId":"` + videoID + `"},
 			"flexColumns":[
 				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"` + title + `"}]}}},
-				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"` + artists + `"},{"text":" • "},{"text":"` + duration + `"}]}}}
+				{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"` + artists + `","navigationEndpoint":{"browseEndpoint":{"browseId":"UCartist"}}},{"text":" • "},{"text":"` + duration + `"}]}}}
 			]}}]}}
 	]}}}}]}}}`
 }
