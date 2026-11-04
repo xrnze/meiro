@@ -130,6 +130,66 @@ func TestAClickOnAPinnedPlaylistNavigatesAndStaysSelected(t *testing.T) {
 	}
 }
 
+// Deleting a pinned playlist takes the pin off with the playlist.
+func TestDeletingAPinnedPlaylistUnpinsIt(t *testing.T) {
+	resetFakes()
+	a := signedInApp(t)
+	tt := open(a, "/playlist/VLPL_songs")
+	pin(t, a, tt, "VLPL_songs", "Ameiro Playlist")
+	if err := tt.RightClick("More options for Ameiro Playlist"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Delete playlist"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("Delete"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if playlistDeletes.Load() != 1 {
+		t.Fatalf("the answer wrote %d deletes", playlistDeletes.Load())
+	}
+	if len(a.settings.PinnedPlaylists) != 0 {
+		t.Fatalf("the deleted playlist stayed pinned: %+v", a.settings.PinnedPlaylists)
+	}
+}
+
+// A pinned playlist whose page loads brings its pin's title and art up to
+// date, so a renamed playlist shows its new name in the rail.
+func TestALoadedPlaylistPageUpdatesItsPinnedTitle(t *testing.T) {
+	resetFakes()
+	a := newTestApp(t)
+	a.setPinned("VLPL_songs", true, "Old Name", "")
+	tt := open(a, "/playlist/VLPL_songs")
+	tt.Frame()
+	want := []settings.PinnedPlaylist{{ID: "VLPL_songs", Title: "Ameiro Playlist", Art: "https://img.test/ameiro.png"}}
+	if !slices.Equal(a.settings.PinnedPlaylists, want) {
+		t.Fatalf("the loaded page kept the pin %+v, want %+v", a.settings.PinnedPlaylists, want)
+	}
+	a.router.Push("/home")
+	tt.Frame()
+	if !tt.HasText("Ameiro Playlist") || tt.HasText("Old Name") {
+		t.Fatalf("the rail shows a stale pin: %q", tt.Texts())
+	}
+
+	// A pin stored by its ID alone, because the page had not loaded when it
+	// was pinned, fills its title in the same way.
+	a.setPinned("VLPLhype", true, "", "")
+	a.router.Push("/playlist/VLPLhype")
+	tt.Frame()
+	if a.playlistPinned("VLPLhype") {
+		for _, p := range a.settings.PinnedPlaylists {
+			if p.ID == "VLPLhype" && p.Title != "Hype" {
+				t.Fatalf("the ID-only pin kept no title: %+v", p)
+			}
+		}
+	} else {
+		t.Fatal("the ID-only pin vanished")
+	}
+}
+
 func TestUnpinningTakesThePlaylistOffTheRail(t *testing.T) {
 	resetFakes()
 	a := newTestApp(t)

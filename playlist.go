@@ -228,6 +228,7 @@ func (a *app) confirmDeletePlaylist() {
 			if open {
 				a.deletePlaylist = nil
 			}
+			a.setPinned(id, false, "", "")
 			a.forgetPlaylist(id)
 			switch strings.TrimSpace(title) {
 			case "":

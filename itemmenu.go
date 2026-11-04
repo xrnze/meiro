@@ -269,7 +269,13 @@ func (a *app) heroMenu(c *ui.Context, anchor ui.Element) {
 				close()
 			}
 		} else if r.id == routePlaylist && m3.MenuItem(c, "Pin to sidebar", m3.IconPushPin).Clicked() {
-			a.setPinned(id, true, a.page.detail.title, a.page.detail.art)
+			// A page still loading has no title yet; pinning it by its ID is
+			// enough, the page fills the rest in when it loads.
+			if title := a.page.detail.title; title != "" {
+				a.setPinned(id, true, title, a.page.detail.art)
+			} else {
+				a.setPinned(id, true, "", "")
+			}
 			close()
 		}
 		if r.id == routePlaylist && m3.MenuItem(c, "Delete playlist", m3.IconDelete).Clicked() {

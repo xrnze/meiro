@@ -401,6 +401,13 @@ func (a *app) applyPage(p *pageData, r *route, path string, client *youtube.Clie
 			p.detail.description = result.Description
 		}
 		a.details.Put(path, p.detail)
+		// A pinned playlist whose page loads brings its pin's heading and
+		// cover up to date, so a renamed playlist shows its new name.
+		if r.target == youtube.TargetPlaylist {
+			if id, ok := matchPattern(r.pattern, path); ok {
+				a.refreshPinned(id, p.detail.title, p.detail.art)
+			}
+		}
 		if result.Library.ID != "" {
 			p.library = result.Library
 		}
