@@ -273,6 +273,7 @@ go_test(
         "scrobble_test.go",
         "settingswatch_test.go",
         "shortcuts_test.go",
+        "songrow_test.go",
         "songvideo_test.go",
         "states_test.go",
         "subscription_test.go",

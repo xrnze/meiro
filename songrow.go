@@ -50,6 +50,17 @@ func (a *app) playingRow(item youtube.MusicItem, o songOptions) bool {
 	return item.VideoID == a.current.VideoID
 }
 
+// queueBlur is how far the tracks shuffle keeps out of sight are blurred, in
+// DIPs: enough that no name or cover reads through it.
+const queueBlur = 8
+
+// hidesQueueRow says whether shuffle hides a row of the queue: the tracks
+// after the one playing, recommendations included, are what the listener
+// would rather not see coming.
+func (a *app) hidesQueueRow(o songOptions) bool {
+	return a.shuffle && o.list == "queue" && o.position > a.queue.index
+}
+
 // songRow shows a song, an album, an artist or a playlist as a row: artwork,
 // name over details, and the length. The song playing is picked out in a
 // tonal container with dancing bars.
@@ -178,6 +189,11 @@ func (a *app) songRow(c *ui.Context, item youtube.MusicItem, queue []youtube.Mus
 		})
 		if !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) && (!hovered || o.list == "queue") {
 			menuButton.Opacity(0).PassThrough()
+		}
+		// A hidden row opens up while the pointer or the focus is on it, so
+		// its song can still be played, queued or dragged on purpose.
+		if a.hidesQueueRow(o) && !hovered && !main.FocusVisible() && !menuButton.FocusVisible() {
+			row.Blur(queueBlur)
 		}
 	})
 	pointer := main.RightClicked() || menuButton.RightClicked()

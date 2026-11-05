@@ -19,6 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   right away, and each turns into its song when the answer lands. Last.fm
   hears of the song too: the play being scrobbled becomes the song's title
   and artist when the answer lands, not the video's.
+- **Shuffle keeps the queue to itself.** While shuffle is on, the Up next list
+  blurs the tracks after the one playing, recommendations included, so neither
+  a name nor a cover gives away what comes next. The track playing and the ones
+  already played stay readable. Resting the pointer on a row, or tabbing to it,
+  opens that row up, so a song can still be played, queued or dragged on
+  purpose, and turning shuffle off shows the list again.
 - **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
 
 ### Changed
