@@ -79,6 +79,28 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	if again := sharpness("Track b"); again > next/2 {
 		t.Errorf("the row stayed open after the pointer left: sharpness %.2f against %.2f", again, next)
 	}
+	// The list's own cursor opens a row too, and so does the row's menu: the
+	// keyboard reaches both without the pointer.
+	tabTo(t, tt, "Track a")
+	tt.Key(0, ui.KeyHome)
+	tt.Key(0, ui.KeyDown)
+	settle()
+	index, ok := a.queue.trackAt(a.nowPlaying.queueSelectionCursor)
+	if !ok || index <= a.queue.index {
+		t.Fatalf("the cursor is on track %d, not on one to come", index)
+	}
+	picked := a.queue.at(index).Title
+	if got := sharpness(picked); got < next/2 {
+		t.Errorf("the row the cursor is on stayed blurred: sharpness %.2f against %.2f", got, next)
+	}
+	tt.Key(ui.Shift, ui.KeyF10)
+	settle()
+	if got := sharpness(picked); got < next/2 {
+		t.Errorf("the row whose menu is open stayed blurred: sharpness %.2f against %.2f", got, next)
+	}
+	tt.Key(0, ui.KeyEscape)
+	settle()
+
 	// Turning shuffle off shows the list again.
 	a.setShuffle(false)
 	settle()

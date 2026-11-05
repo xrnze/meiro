@@ -190,9 +190,10 @@ func (a *app) songRow(c *ui.Context, item youtube.MusicItem, queue []youtube.Mus
 		if !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) && (!hovered || o.list == "queue") {
 			menuButton.Opacity(0).PassThrough()
 		}
-		// A hidden row opens up while the pointer or the focus is on it, so
-		// its song can still be played, queued or dragged on purpose.
-		if a.hidesQueueRow(o) && !hovered && !main.FocusVisible() && !menuButton.FocusVisible() {
+		// A hidden row opens up while the pointer, the focus or the list's
+		// cursor is on it, and while its own menu is open, so its song can
+		// still be played, queued or dragged on purpose.
+		if a.hidesQueueRow(o) && !hovered && !queueCursor && !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) {
 			row.Blur(queueBlur)
 		}
 	})
