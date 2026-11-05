@@ -11,21 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The player shows the volume as a number.** While the cursor is over or the focus is on the volume control, the current level reads, for example, 72, floating over the slider's thumb and following it as the value changes, in the player bar and in the full-screen player. The narrow bar's volume panel shows it over its slider too.
 - **The thumb grows as you grab a slider.** Holding the scrubber or the volume slider grows its thumb, while the track and its fill stay slim, and it settles back on release.
 - **Pin playlists to the sidebar.** The menu of a playlist page pins it to the navigation rail, where its cover and name sit under the destinations above Settings. Clicking one opens the playlist, and the rail keeps it selected while the playlist is showing. Pinned playlists survive restarts, and the same menu unpins them. Deleting a playlist takes its pin off too, and a playlist's page keeps the pin's name and cover up to date when the playlist is renamed or gets a new cover.
-- **A music video plays its song.** When Meiro would play a track's music
-  video, it plays the song version of the same track instead, as YouTube
-  Music Premium members hear it: the queue, the cover and the title come
-  from the song, and a video with no song version plays itself as before.
-  Videos added to the queue while their song is still being found join it
-  right away, and each turns into its song when the answer lands. Last.fm
-  hears of the song too: the play being scrobbled becomes the song's title
-  and artist when the answer lands, not the video's.
-- **Shuffle keeps the queue to itself.** While shuffle is on, the Up next list
-  blurs the tracks after the one playing, recommendations included, so neither
-  a name nor a cover gives away what comes next. The track playing and the ones
-  already played stay readable. The pointer, the keyboard, the list's cursor or
-  a chosen selection opens a row up, so a song can still be played, moved or
-  removed on purpose, and turning shuffle off shows the list again.
-- **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
+- **A music video plays its song.** When Meiro would play a track's music video, it plays the song version of the same track instead, as YouTube Music Premium members hear it: the queue, the cover and the title come from the song, and a video with no song version plays itself as before. Videos added to the queue while their song is still being found join it right away, and each turns into its song when the answer lands. Last.fm hears of the song too: the play being scrobbled becomes the song's title and artist when the answer lands, not the video's.
+- **Shuffle keeps the queue to itself.** While shuffle is on, the Up next list blurs the tracks after the one playing, recommendations included, so neither a name nor a cover gives away what comes next. The track playing and the ones already played stay readable. The pointer, the keyboard, the list's cursor or a chosen selection opens a row up, so a song can still be played, moved or removed on purpose, and turning shuffle off shows the list again.
 
 ### Changed
 
@@ -34,9 +21,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - **A music video with an intro now plays its song.** The song lookup for a video allowed a couple of seconds of difference, so a music video that runs longer than its song, by an intro or an outro of up to half a minute, was treated as having no song version and played itself, at the quieter level its video master was mixed at. A video may now run up to 30 seconds longer than its song and still plays the song; a song longer than its video is still a different edit, and keeps the video playing. A video titled "Artist - Song", the shape YouTube uploads have, now matches its song too, whose title carries neither the uploader's name nor the featured artists, and songs a search answers without an artist are no longer ruled out on that count. A re-upload listed without its length no longer beats the official song, whose length is known, and a cache written by an older matcher is asked for again rather than trusted.
-
 - **A crashed ffmpeg says so.** When the ffmpeg process dies without a word, the playback failure now reads, for example, "ffmpeg crashed: signal: segmentation fault" instead of "ffmpeg stopped", so a broken ffmpeg build is visible in the log.
 
+## [0.6.1] - 2026-11-05
+
+### Added
+
+- **Windows shows what Meiro plays.** The media controls in the volume flyout and on the lock screen, and status bars that read them, show the song's title, artist, album and cover, with its progress. Their play, pause, next, previous and seek controls drive Meiro. The taskbar buttons and the media keys work as before.
+
+### Changed
+
+- **The shelves' cards breathe.** The artwork now runs to the card's edges, the title and subtitle keep the card's 16 DIP gutter instead of 8, and the cards are 160 DIP wide with 16 DIP between them rather than 176 and 4. The play button takes a corner closer to the card's, so it no longer looks wedged into the artwork's curve.
+
+### Fixed
+
+- **The progress handle keeps one width.** On a desktop whose scale is not a whole number, the bar that marks the position in a track rounded to one of two widths as it moved, so it looked to flicker wide and thin. Its edges now land on whole device pixels.
 - **Adding to the queue keeps the song after the one playing.** When Auto-play had already moved into recommendations, an added song went back to the original queue behind the track playing, so it never played. It now joins the queue after the current track, and recommendations that have played fold into the queue above the Recommended heading as YouTube Music does.
 - **A large playlist loads every song.** YouTube returns the songs after a playlist's first page in a shape Meiro did not follow, so a playlist of several hundred songs stopped after its first pages. The page now follows every page to the end, with a spinner under the songs while the next page arrives.
 - **Track notifications stay away while you use Meiro.** A new track no longer shows a notification while the main window or the mini player is in front, and the previous track's notification goes away. Notifications still appear while you are in another app.
@@ -58,7 +57,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The search field takes the page's colour.** The top-bar search and the Settings search now use a light tonal fill instead of neutral grey, so they stand out against the header wash while still following the theme.
 - **The songs toolbar stays on screen.** Scrolling a playlist past its Songs row used to take the search, Sort and the direction with it. That row now keeps its place at the top of the list while the songs and the sections below scroll under it.
 - **Playlist search sits with Sort above the songs.** The search that narrows a playlist now lives in the toolbar with the sort controls instead of beside Play and Shuffle in the hero. It opens as a simple line under the field rather than a filled pill, and still keeps the page filtered to the songs that match. The sort controls beside it are bare buttons too, with no outlined pill around the field or the direction.
-- **The shelves' cards breathe.** The artwork now runs to the card's edges, the title and subtitle keep the card's 16 DIP gutter instead of 8, and the cards are 160 DIP wide with 16 DIP between them rather than 176 and 4. The play button takes a corner closer to the card's, so it no longer looks wedged into the artwork's curve.
 - **Shelves no longer draw a scroll bar.** The arrows beside a shelf's title page it, and the wheel and the touchpad still move it sideways. The row of cards ends closer to the section below.
 - **The close prompt shows which of its buttons quits.** "Close Meiro" reads as a destructive action on macOS and Linux, and Escape keeps Meiro running on macOS, where it did nothing before.
 
