@@ -49,13 +49,16 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 		}
 		return total / float64(count)
 	}
+	// sharpness reads the middle of a row, where its name is, clear of the
+	// outline the list draws around the edges of the row its cursor is on:
+	// artwork and the row's padding on the left, the length on the right.
 	sharpness := func(label string) float64 {
 		t.Helper()
 		r, ok := tt.Find(label)
 		if !ok {
 			t.Fatalf("the queue shows no row %q: %q", label, tt.Texts())
 		}
-		return roughness(r)
+		return roughness(ui.Rect{X: r.X + 68, Y: r.Y + 8, W: r.W - 136, H: r.H - 16})
 	}
 
 	next, played := sharpness("Track b"), sharpness("Track a")
@@ -81,9 +84,10 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 		t.Errorf("the row stayed open after the pointer left: sharpness %.2f against %.2f", again, next)
 	}
 
-	// The keys open the row their cursor lands on, wherever the focus sits
-	// inside the list.
-	tabTo(t, tt, "More options for Track b")
+	// The keys open the row their cursor lands on, with the focus inside the
+	// list but on another row's menu button.
+	elsewhere := a.queue.at(2).Title
+	tabTo(t, tt, "More options for "+elsewhere)
 	tt.Key(0, ui.KeyHome)
 	tt.Key(0, ui.KeyDown)
 	settle()
@@ -92,6 +96,9 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 		t.Fatalf("the cursor is on track %d, not on one to come", index)
 	}
 	picked := a.queue.at(index).Title
+	if picked == elsewhere {
+		t.Fatalf("the cursor landed on %q, the row holding the focus", picked)
+	}
 	if got := sharpness(picked); got < next/2 {
 		t.Errorf("the row the cursor is on stayed blurred: sharpness %.2f against %.2f", got, next)
 	}
