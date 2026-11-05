@@ -70,6 +70,9 @@ func (a *app) songRow(c *ui.Context, item youtube.MusicItem, queue []youtube.Mus
 	playing := a.playingRow(item, o)
 	selected := o.list == "queue" && a.nowPlaying.queueSelection.Has(queueRowKey(&a.queue, a.queue.rowOf(o.position)))
 	queueCursor := o.list == "queue" && a.nowPlaying.queueList.Focused(c) && a.nowPlaying.queueSelectionCursor == a.queue.rowOf(o.position)
+	// queueChosen is whether the list's keys act on this row wherever the
+	// focus sits within the list, as it does once Tab reaches a row's button.
+	queueChosen := o.list == "queue" && a.nowPlaying.queueList.FocusWithin(c) && a.nowPlaying.queueSelectionCursor == a.queue.rowOf(o.position)
 	key := songKey(item, o)
 	height, artSize, padding, gap, iconSize := float32(rowHeight), float32(48), float32(8), float32(12), float32(24)
 	titleRole, subtitleRole := m3.BodyLarge, m3.BodyMedium
@@ -190,10 +193,10 @@ func (a *app) songRow(c *ui.Context, item youtube.MusicItem, queue []youtube.Mus
 		if !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) && (!hovered || o.list == "queue") {
 			menuButton.Opacity(0).PassThrough()
 		}
-		// A hidden row opens up while the pointer, the focus or the list's
-		// cursor is on it, and while its own menu is open, so its song can
-		// still be played, queued or dragged on purpose.
-		if a.hidesQueueRow(o) && !hovered && !queueCursor && !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) {
+		// A hidden row opens up while the listener is on it: the pointer, the
+		// focus Tab brings to the row or its menu button, a chosen selection,
+		// the list's cursor, or the row's own menu.
+		if a.hidesQueueRow(o) && !hovered && !selected && !queueChosen && !main.FocusVisible() && !menuButton.FocusVisible() && !a.menu.opened(key) {
 			row.Blur(queueBlur)
 		}
 	})

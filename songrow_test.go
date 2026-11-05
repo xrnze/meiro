@@ -10,7 +10,7 @@ import (
 
 // Shuffle hides what plays next: every row ahead of the track playing is
 // blurred, so neither a name nor a cover gives the next track away, and a row
-// opens up while the pointer rests on it. The track playing stays sharp.
+// opens up while the listener is on it. The track playing stays sharp.
 func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	a, _ := playbackApp(t)
 	q := tracks("a", "b", "c", "d")
@@ -31,22 +31,16 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	}
 	settle()
 
-	// sharpness is how much neighbouring pixels of a row differ: sharp text
+	// roughness is how much neighbouring pixels of a box differ: sharp text
 	// and a sharp cover edge change from pixel to pixel, blurred ones barely
-	// move. It reads a row's own box, so a row that moved down the list is
-	// measured the same way.
-	sharpness := func(label string) float64 {
-		t.Helper()
-		r, ok := tt.Find(label)
-		if !ok {
-			t.Fatalf("the queue shows no row %q: %q", label, tt.Texts())
-		}
+	// move. A row that moved down the list is measured the same way.
+	roughness := func(r ui.Rect) float64 {
 		img := tt.Image()
-		total, count := 0.0, 0
 		lum := func(x, y int) float64 {
 			p := img.RGBAAt(x, y)
 			return 0.2126*float64(p.R) + 0.7152*float64(p.G) + 0.0722*float64(p.B)
 		}
+		total, count := 0.0, 0
 		for y := int(r.Y); y < int(r.Y+r.H); y++ {
 			for x := int(r.X); x < int(r.X+r.W)-1; x++ {
 				total += math.Abs(lum(x+1, y) - lum(x, y))
@@ -54,6 +48,14 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 			}
 		}
 		return total / float64(count)
+	}
+	sharpness := func(label string) float64 {
+		t.Helper()
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("the queue shows no row %q: %q", label, tt.Texts())
+		}
+		return roughness(r)
 	}
 
 	next, played := sharpness("Track b"), sharpness("Track a")
@@ -70,8 +72,7 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	r, _ := tt.Find("Track b")
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	settle()
-	open := sharpness("Track b")
-	if open < next/2 {
+	if open := sharpness("Track b"); open < next/2 {
 		t.Errorf("the row under the pointer stayed blurred: sharpness %.2f against %.2f", open, next)
 	}
 	tt.Move(1, 1)
@@ -79,9 +80,10 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	if again := sharpness("Track b"); again > next/2 {
 		t.Errorf("the row stayed open after the pointer left: sharpness %.2f against %.2f", again, next)
 	}
-	// The list's own cursor opens a row too, and so does the row's menu: the
-	// keyboard reaches both without the pointer.
-	tabTo(t, tt, "Track a")
+
+	// The keys open the row their cursor lands on, wherever the focus sits
+	// inside the list.
+	tabTo(t, tt, "More options for Track b")
 	tt.Key(0, ui.KeyHome)
 	tt.Key(0, ui.KeyDown)
 	settle()
@@ -93,6 +95,7 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	if got := sharpness(picked); got < next/2 {
 		t.Errorf("the row the cursor is on stayed blurred: sharpness %.2f against %.2f", got, next)
 	}
+	// So does a row's own menu, which acts on that row.
 	tt.Key(ui.Shift, ui.KeyF10)
 	settle()
 	if got := sharpness(picked); got < next/2 {
@@ -100,6 +103,29 @@ func TestShuffleBlursTheRowsItHides(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEscape)
 	settle()
+
+	// A chosen selection opens too, since its menu acts on all of it: the
+	// rows the keys do not sit on are the ones a range needs to show.
+	if err := tt.ClickWith(ui.Shift, picked); err != nil {
+		t.Fatal(err)
+	}
+	other := ""
+	for i := a.queue.index + 1; i < a.queue.len() && other == ""; i++ {
+		if a.queue.at(i).Title != picked {
+			other = a.queue.at(i).Title
+		}
+	}
+	if other == "" {
+		t.Fatal("the queue holds no other track to come")
+	}
+	if err := tt.ClickWith(ui.Shift, other); err != nil {
+		t.Fatal(err)
+	}
+	tt.Move(1, 1)
+	settle()
+	if got := sharpness(picked); got < next/2 {
+		t.Errorf("a chosen row stayed blurred: sharpness %.2f against %.2f", got, next)
+	}
 
 	// Turning shuffle off shows the list again.
 	a.setShuffle(false)
