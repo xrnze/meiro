@@ -999,7 +999,10 @@ func (a *sharedAudio) context() (device, error) {
 		// A device asked to sleep before it was open sleeps as soon as it
 		// opens.
 		if w, ok := dev.(waker); ok && a.parked {
-			parkErr = w.suspend()
+			if parkErr = w.suspend(); parkErr != nil {
+				// The park did not happen; the next ask retries it.
+				a.parked = false
+			}
 		}
 		a.mu.Unlock()
 	})

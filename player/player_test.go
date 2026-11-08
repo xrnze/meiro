@@ -125,6 +125,26 @@ func TestWakeDeviceSleepsBeforeTheDeviceOpens(t *testing.T) {
 	}
 }
 
+// A park whose suspend fails at open time is asked for again.
+func TestWakeDeviceRetriesAParkThatFailedToOpen(t *testing.T) {
+	dev := &wakeDevice{fail: errors.New("boom")}
+	audio := &sharedAudio{open: func() (device, error) { return dev, nil }}
+	p := New(withAudio(audio))
+	t.Cleanup(p.Stop)
+
+	p.WakeDevice(false)
+	if _, err := audio.context(); err != nil {
+		t.Fatal(err)
+	}
+	dev.mu.Lock()
+	dev.fail = nil
+	dev.mu.Unlock()
+	p.WakeDevice(false)
+	if acted := dev.did(); !slices.Equal(acted, []string{"suspend", "suspend"}) {
+		t.Errorf("a failed park at open time was not retried: %v", acted)
+	}
+}
+
 func TestWakeDeviceChangesOnceAndRetriesFailures(t *testing.T) {
 	dev := &wakeDevice{}
 	audio := &sharedAudio{open: func() (device, error) { return dev, nil }}
