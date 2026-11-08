@@ -578,7 +578,11 @@ func (a *app) setupDesktop() {
 // syncDesktop lines the sleep assertion and the tray up with playback. Every
 // path that changes playback reaches it through syncSystemMedia.
 func (a *app) syncDesktop() {
-	a.desktop.keepAwake(a.loading() || (a.player.Active() && !a.player.Paused() && !a.player.Ended()))
+	on := a.loading() || (a.player.Active() && !a.player.Paused() && !a.player.Ended())
+	a.desktop.keepAwake(on)
+	// The same rule parks the audio device: an open audio stream would
+	// keep a computer from sleeping even with playback paused.
+	a.player.WakeDevice(on)
 	a.desktop.setTray(a.trayEnabled(), a.settings.TrayMark, trayState{tip: a.trayTip()}, a.miniPlayer, a.setMiniShown)
 	a.desktop.setTitle(a.windowTitle())
 	a.syncNotch()

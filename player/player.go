@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/url"
 	"os"
@@ -80,6 +81,10 @@ type Player struct {
 	// crossfade is how long the end of a track fades into the start of the
 	// next, zero for none. Written under ctl.
 	crossfade time.Duration
+
+	// deviceAwake is the last state WakeDevice asked of the audio device,
+	// so repeated syncs do not disturb it. Guarded by mu.
+	deviceAwake bool
 
 	// next is the stream decoding ahead of the end of the current one, and
 	// advanced is the tag of the one that took over without a pause, until
@@ -933,10 +938,19 @@ type device interface {
 	Err() error
 }
 
+// waker is a device whose output can be parked while nothing plays, and
+// woken again for sound.
+type waker interface {
+	suspend() error
+	resume() error
+}
+
 type otoDevice struct{ ctx *oto.Context }
 
 func (d otoDevice) newPlayer(r io.Reader) output { return d.ctx.NewPlayer(r) }
 func (d otoDevice) Err() error                   { return d.ctx.Err() }
+func (d otoDevice) suspend() error               { return d.ctx.Suspend() }
+func (d otoDevice) resume() error                { return d.ctx.Resume() }
 
 // sharedAudio opens an audio device once and remembers the outcome. Oto allows
 // one context per process and cannot retry a failed open, so a failure is
@@ -945,8 +959,12 @@ func (d otoDevice) Err() error                   { return d.ctx.Err() }
 type sharedAudio struct {
 	open func() (device, error)
 	once sync.Once
-	dev  device
-	err  error
+
+	// mu guards dev and err, which the once fills in while wake reads
+	// them before the open has finished.
+	mu  sync.Mutex
+	dev device
+	err error
 }
 
 // processAudio is the context every Player shares.
@@ -970,13 +988,56 @@ func openOto() (device, error) {
 func (a *sharedAudio) context() (device, error) {
 	a.once.Do(func() {
 		dev, err := a.open()
+		a.mu.Lock()
+		defer a.mu.Unlock()
 		if err != nil {
 			a.err = fmt.Errorf("player: open the audio device: %w", err)
 			return
 		}
 		a.dev = dev
 	})
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.dev, a.err
+}
+
+// wake suspends the audio device while on is false and resumes it while on
+// is true, without opening a device that was not opened yet: a suspended
+// device takes back the audio stream that would keep a computer from
+// sleeping while nothing plays. Devices that cannot park their output, and
+// ones not open, stay as they are. Errors go to the caller.
+func (a *sharedAudio) wake(on bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	w, ok := a.dev.(waker)
+	if !ok {
+		return nil
+	}
+	if on {
+		return w.resume()
+	}
+	return w.suspend()
+}
+
+// WakeDevice suspends the audio device while on is false and resumes it
+// while on is true, without opening a device that is not open yet. The
+// desktop pairs it with its sleep assertion, so a paused or stopped player
+// lets the computer sleep. A failure is logged, and the next call retries.
+func (p *Player) WakeDevice(on bool) {
+	p.mu.Lock()
+	if on == p.deviceAwake {
+		p.mu.Unlock()
+		return
+	}
+	p.deviceAwake = on
+	p.mu.Unlock()
+	if err := p.audio.wake(on); err != nil {
+		action := "suspend"
+		if on {
+			action = "resume"
+		}
+		log.Printf("player: %s the audio device: %v", action, err)
+	}
 }
 
 // audioFailure returns why the device or the session's output stopped working,
