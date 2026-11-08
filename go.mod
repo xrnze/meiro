@@ -23,3 +23,5 @@ require (
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
+
+replace github.com/ebitengine/oto/v3 => github.com/xrnze/oto/v3 v3.5.1-park
