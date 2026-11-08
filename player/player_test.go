@@ -108,45 +108,59 @@ func (d *wakeDevice) did() []string {
 	return slices.Clone(d.actions)
 }
 
-func TestWakeDeviceFollowsNothingButChanges(t *testing.T) {
+// A park asked for before the device is open sleeps it as soon as it
+// opens, once, whoever wins the open.
+func TestWakeDeviceSleepsBeforeTheDeviceOpens(t *testing.T) {
 	dev := &wakeDevice{}
 	audio := &sharedAudio{open: func() (device, error) { return dev, nil }}
 	p := New(withAudio(audio))
 	t.Cleanup(p.Stop)
 
-	// Nothing is open, so there is nothing to suspend or resume.
 	p.WakeDevice(false)
-	if acted := dev.did(); len(acted) != 0 {
-		t.Errorf("an unopened device was woken: %v", acted)
+	if _, err := audio.context(); err != nil {
+		t.Fatal(err)
 	}
+	if acted := dev.did(); !slices.Equal(acted, []string{"suspend"}) {
+		t.Errorf("the device opened without its asked-for sleep: %v", acted)
+	}
+}
+
+func TestWakeDeviceChangesOnceAndRetriesFailures(t *testing.T) {
+	dev := &wakeDevice{}
+	audio := &sharedAudio{open: func() (device, error) { return dev, nil }}
+	p := New(withAudio(audio))
+	t.Cleanup(p.Stop)
 
 	// Opening the device, as a first play does, leaves it awake.
 	if _, err := audio.context(); err != nil {
 		t.Fatal(err)
 	}
-
-	// Playback starting wakes the device, once, however often the app syncs.
-	p.WakeDevice(true)
-	p.WakeDevice(true)
-	if acted := dev.did(); !slices.Equal(acted, []string{"resume"}) {
-		t.Errorf("starting playback woke the device: %v", acted)
+	if acted := dev.did(); len(acted) != 0 {
+		t.Errorf("the opening device was parked: %v", acted)
 	}
 
-	// Playback pausing or stopping suspends it, again once.
-	p.WakeDevice(false)
-	p.WakeDevice(false)
-	if acted := dev.did(); !slices.Equal(acted, []string{"resume", "suspend"}) {
-		t.Errorf("pausing playback parked the device: %v", acted)
+	// Waking an awake device does nothing, however often the app syncs.
+	p.WakeDevice(true)
+	p.WakeDevice(true)
+	if acted := dev.did(); len(acted) != 0 {
+		t.Errorf("playing woke an awake device: %v", acted)
 	}
 
-	// A failure is reported to the caller, never panics, and the next
-	// change retries.
-	boom := errors.New("boom")
+	// Pausing suspends it, again once.
+	p.WakeDevice(false)
+	p.WakeDevice(false)
+	if acted := dev.did(); !slices.Equal(acted, []string{"suspend"}) {
+		t.Errorf("pausing parked the device: %v", acted)
+	}
+
+	// A failure keeps the old state, so the next call retries it, and
+	// never panics.
 	dev.mu.Lock()
-	dev.fail = boom
+	dev.fail = errors.New("boom")
 	dev.mu.Unlock()
 	p.WakeDevice(true)
-	if acted := dev.did(); !slices.Equal(acted, []string{"resume", "suspend", "resume"}) {
-		t.Errorf("a failing resume changed what the device saw: %v", acted)
+	p.WakeDevice(true)
+	if acted := dev.did(); !slices.Equal(acted, []string{"suspend", "resume", "resume"}) {
+		t.Errorf("a failing resume did not retry on the next ask: %v", acted)
 	}
 }

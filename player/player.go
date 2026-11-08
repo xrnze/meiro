@@ -82,10 +82,6 @@ type Player struct {
 	// next, zero for none. Written under ctl.
 	crossfade time.Duration
 
-	// deviceAwake is the last state WakeDevice asked of the audio device,
-	// so repeated syncs do not disturb it. Guarded by mu.
-	deviceAwake bool
-
 	// next is the stream decoding ahead of the end of the current one, and
 	// advanced is the tag of the one that took over without a pause, until
 	// Advanced reports it.
@@ -960,11 +956,15 @@ type sharedAudio struct {
 	open func() (device, error)
 	once sync.Once
 
-	// mu guards dev and err, which the once fills in while wake reads
-	// them before the open has finished.
-	mu  sync.Mutex
-	dev device
-	err error
+	// mu guards dev, err and parked, which the once fills in while wake
+	// reads them before the open has finished. parked is the last state
+	// WakeDevice asked for, false until told otherwise: the state outlives
+	// the device, so a device asked to sleep before it is open sleeps as
+	// soon as it opens.
+	mu     sync.Mutex
+	parked bool
+	dev    device
+	err    error
 }
 
 // processAudio is the context every Player shares.
@@ -986,16 +986,26 @@ func openOto() (device, error) {
 
 // context opens the audio device on first use, and reports why it could not.
 func (a *sharedAudio) context() (device, error) {
+	var parkErr error
 	a.once.Do(func() {
 		dev, err := a.open()
 		a.mu.Lock()
-		defer a.mu.Unlock()
 		if err != nil {
 			a.err = fmt.Errorf("player: open the audio device: %w", err)
+			a.mu.Unlock()
 			return
 		}
 		a.dev = dev
+		// A device asked to sleep before it was open sleeps as soon as it
+		// opens.
+		if w, ok := dev.(waker); ok && a.parked {
+			parkErr = w.suspend()
+		}
+		a.mu.Unlock()
 	})
+	if parkErr != nil {
+		log.Printf("player: suspend the audio device: %v", parkErr)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.dev, a.err
@@ -1005,14 +1015,24 @@ func (a *sharedAudio) context() (device, error) {
 // is true, without opening a device that was not opened yet: a suspended
 // device takes back the audio stream that would keep a computer from
 // sleeping while nothing plays. Devices that cannot park their output, and
-// ones not open, stay as they are. Errors go to the caller.
+// ones not open, only remember the state. A failed state keeps asking, so
+// the next call retries; other errors go to the caller.
 func (a *sharedAudio) wake(on bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	w, ok := a.dev.(waker)
-	if !ok {
+	if a.parked == !on {
 		return nil
 	}
+	if w, ok := a.dev.(waker); ok {
+		if err := setAwake(w, on); err != nil {
+			return err
+		}
+	}
+	a.parked = !on
+	return nil
+}
+
+func setAwake(w waker, on bool) error {
 	if on {
 		return w.resume()
 	}
@@ -1020,17 +1040,12 @@ func (a *sharedAudio) wake(on bool) error {
 }
 
 // WakeDevice suspends the audio device while on is false and resumes it
-// while on is true, without opening a device that is not open yet. The
-// desktop pairs it with its sleep assertion, so a paused or stopped player
-// lets the computer sleep. A failure is logged, and the next call retries.
+// while on is true, without opening a device that is not open yet: a
+// request made before the device is open sleeps it as soon as it opens.
+// The desktop pairs it with its sleep assertion, so a paused or stopped
+// player lets the computer sleep. A failure is logged, and the next call
+// retries.
 func (p *Player) WakeDevice(on bool) {
-	p.mu.Lock()
-	if on == p.deviceAwake {
-		p.mu.Unlock()
-		return
-	}
-	p.deviceAwake = on
-	p.mu.Unlock()
 	if err := p.audio.wake(on); err != nil {
 		action := "suspend"
 		if on {
