@@ -144,6 +144,13 @@ func TestReopeningAStreamChecksThatItsSourceStillExists(t *testing.T) {
 	if err := p.SetSpeed(t.Context(), 2); !errors.Is(err, gone) {
 		t.Errorf("speed change reopened an unavailable source: %v", err)
 	}
+	if got := p.Speed(); got != 1 {
+		t.Errorf("failed speed change left speed at %v; want 1", got)
+	}
+	unavailable = false
+	if err := p.SetSpeed(t.Context(), 2); err != nil || p.Speed() != 2 {
+		t.Errorf("retry after reconnect: speed=%v, error=%v", p.Speed(), err)
+	}
 }
 
 func TestSetSpeedGoesOnFromWhereTheStreamIs(t *testing.T) {

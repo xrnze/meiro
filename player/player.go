@@ -453,7 +453,8 @@ func (p *Player) SetSpeed(ctx context.Context, speed float64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if p.speed == speed {
+	previous := p.speed
+	if previous == speed {
 		return nil
 	}
 	p.mu.Lock()
@@ -469,7 +470,13 @@ func (p *Player) SetSpeed(ctx context.Context, speed float64) error {
 	if s == nil || ended {
 		return nil
 	}
-	return p.start(ctx, input, at, paused)
+	if err := p.start(ctx, input, at, paused); err != nil {
+		p.mu.Lock()
+		p.speed = previous
+		p.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 // Speed returns how fast streams play, 1 by default.
