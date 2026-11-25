@@ -131,6 +131,40 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 	}
 }
 
+func TestFailedResetReassemblesTheRetainedDefault(t *testing.T) {
+	dir, source := t.TempDir(), t.TempDir()
+	var lib Library
+	for _, id := range []string{"other", "first"} {
+		track := song(id, true)
+		track.File = fmt.Sprintf("%x.webm", sha256.Sum256([]byte(id)))
+		lib.Add(track)
+	}
+	first, other := lib.Songs[0].File, lib.Songs[1].File
+	if err := os.WriteFile(filepath.Join(dir, first), []byte("retained audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, other), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := Folder{Dir: dir}
+	if err := target.Write(t.Context(), lib); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, indexName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Move(t.Context(), Folder{Dir: source}, target, Library{}, indexDigest(data), func(string) (bool, error) {
+		t.Error("published a reset after its archive failed")
+		return false, nil
+	}); err == nil {
+		t.Error("reset should reject a directory in place of a song")
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, first)); err != nil || string(data) != "retained audio" {
+		t.Errorf("failed reset split the retained copy: %q, %v", data, err)
+	}
+}
+
 func TestOpenRejectsAnIndexThatReferencesUnmanagedFiles(t *testing.T) {
 	dir := t.TempDir()
 	var lib Library

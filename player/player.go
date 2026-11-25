@@ -61,6 +61,20 @@ const EQBandCount = len(EQFrequencies)
 // decode a stream.
 var ErrNoFFmpeg = errors.New("player: ffmpeg is not installed or not on PATH")
 
+// Source is an audio URL or path and an optional check before the decoder
+// opens or reopens it.
+type Source struct {
+	URL      string
+	Validate func(context.Context) error
+}
+
+func (s Source) check(ctx context.Context) error {
+	if s.Validate != nil {
+		return s.Validate(ctx)
+	}
+	return nil
+}
+
 // Player plays one stream at a time.
 type Player struct {
 	// ctl serialises the calls that replace or end the stream: Play, Seek and
@@ -138,9 +152,7 @@ func (p *Player) Play(url string) error {
 // PlayContext starts url from its beginning, replacing anything playing. It
 // returns once ffmpeg has started, not when the stream ends.
 func (p *Player) PlayContext(ctx context.Context, url string) error {
-	p.ctl.Lock()
-	defer p.ctl.Unlock()
-	return p.start(ctx, url, 0, false)
+	return p.PlayAtContext(ctx, url, 0, false)
 }
 
 // PlayAt is Play from the position at, and held when paused. It is how a
@@ -151,9 +163,14 @@ func (p *Player) PlayAt(url string, at time.Duration, paused bool) error {
 
 // PlayAtContext is PlayContext from the position at, and held when paused.
 func (p *Player) PlayAtContext(ctx context.Context, url string, at time.Duration, paused bool) error {
+	return p.PlaySourceContext(ctx, Source{URL: url}, at, paused)
+}
+
+// PlaySourceContext plays input, retaining its validation for decoder restarts.
+func (p *Player) PlaySourceContext(ctx context.Context, input Source, at time.Duration, paused bool) error {
 	p.ctl.Lock()
 	defer p.ctl.Unlock()
-	return p.start(ctx, url, max(at, 0), paused)
+	return p.start(ctx, input, max(at, 0), paused)
 }
 
 // Preload starts decoding url in the background, to follow the stream playing
@@ -171,7 +188,12 @@ func (p *Player) Preload(tag, url string) error {
 
 // PreloadContext is Preload with a caller context for ffmpeg discovery.
 func (p *Player) PreloadContext(ctx context.Context, tag, url string) error {
-	if strings.TrimSpace(url) == "" {
+	return p.PreloadSourceContext(ctx, tag, Source{URL: url})
+}
+
+// PreloadSourceContext preloads input, retaining its validation through handoff.
+func (p *Player) PreloadSourceContext(ctx context.Context, tag string, input Source) error {
+	if strings.TrimSpace(input.URL) == "" {
 		return errors.New("player: stream URL is empty")
 	}
 	ffmpeg, err := p.resolveFFmpeg(ctx)
@@ -189,7 +211,10 @@ func (p *Player) PreloadContext(ctx context.Context, tag, url string) error {
 	p.ctl.Lock()
 	eq, speed := p.eqBands, p.speed
 	p.ctl.Unlock()
-	next, err := p.decode(ffmpeg, url, 0, eq, speed)
+	if err := input.check(ctx); err != nil {
+		return err
+	}
+	next, err := p.decode(ffmpeg, input, 0, eq, speed)
 	if err != nil {
 		return err
 	}
@@ -302,16 +327,16 @@ func (p *Player) SeekContext(ctx context.Context, at time.Duration) {
 	defer p.ctl.Unlock()
 	p.mu.Lock()
 	s := p.session
-	var url string
+	var input Source
 	var paused bool
 	if s != nil {
-		url, paused = s.url, s.paused
+		input, paused = s.input, s.paused
 	}
 	p.mu.Unlock()
 	if s == nil || at < 0 {
 		return
 	}
-	_ = p.start(ctx, url, at, paused)
+	_ = p.start(ctx, input, at, paused)
 }
 
 // Stop ends the stream and forgets it.
@@ -434,17 +459,17 @@ func (p *Player) SetSpeed(ctx context.Context, speed float64) error {
 	p.mu.Lock()
 	p.speed = speed
 	s := p.session
-	var url string
+	var input Source
 	var at time.Duration
 	var paused, ended bool
 	if s != nil {
-		url, at, paused, ended = s.url, s.played(), s.paused, p.endedLocked(s)
+		input, at, paused, ended = s.input, s.played(), s.paused, p.endedLocked(s)
 	}
 	p.mu.Unlock()
 	if s == nil || ended {
 		return nil
 	}
-	return p.start(ctx, url, at, paused)
+	return p.start(ctx, input, at, paused)
 }
 
 // Speed returns how fast streams play, 1 by default.
@@ -470,7 +495,7 @@ func (p *Player) CanMoveFilesIn(dir string) bool {
 	defer p.ctl.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	inDir := func(s *session) bool { return s != nil && filepath.Dir(s.url) == dir }
+	inDir := func(s *session) bool { return s != nil && filepath.Dir(s.input.URL) == dir }
 	return !inDir(p.session) && !inDir(p.next)
 }
 
@@ -624,10 +649,10 @@ func (p *Player) endedLocked(s *session) bool {
 	return endOfStream(s.source.read.Load(), s.source.eof.Load(), s.out.IsPlaying(), s.paused)
 }
 
-// start replaces the current stream with url, decoded from at. The caller
+// start replaces the current stream with input, decoded from at. The caller
 // holds ctl and not mu.
-func (p *Player) start(ctx context.Context, url string, at time.Duration, paused bool) error {
-	if strings.TrimSpace(url) == "" {
+func (p *Player) start(ctx context.Context, input Source, at time.Duration, paused bool) error {
+	if strings.TrimSpace(input.URL) == "" {
 		return errors.New("player: stream URL is empty")
 	}
 	ffmpeg, err := p.resolveFFmpeg(ctx)
@@ -638,9 +663,12 @@ func (p *Player) start(ctx context.Context, url string, at time.Duration, paused
 	if err != nil {
 		return err
 	}
+	if err := input.check(ctx); err != nil {
+		return err
+	}
 	p.stop()
 
-	s, err := p.decode(ffmpeg, url, at, p.eqBands, p.speed)
+	s, err := p.decode(ffmpeg, input, at, p.eqBands, p.speed)
 	if err != nil {
 		return err
 	}
@@ -661,8 +689,8 @@ func (p *Player) start(ctx context.Context, url string, at time.Duration, paused
 // that reaps it. The session's reader shapes the PCM as it reaches the output.
 // The session has no output yet: start gives it one, and a handoff takes over
 // the one before it.
-func (p *Player) decode(ffmpeg, url string, at time.Duration, eq []float64, speed float64) (*session, error) {
-	cmd := exec.Command(ffmpeg, streamArgs(url, at, p.rangedHTTP, speed)...) //nolint:noctx // the player ends ffmpeg itself when the stream is replaced or stopped
+func (p *Player) decode(ffmpeg string, input Source, at time.Duration, eq []float64, speed float64) (*session, error) {
+	cmd := exec.Command(ffmpeg, streamArgs(input.URL, at, p.rangedHTTP, speed)...) //nolint:noctx // the player ends ffmpeg itself when the stream is replaced or stopped
 	hideWindow(cmd)
 	pipe, writer, err := os.Pipe()
 	if err != nil {
@@ -678,7 +706,7 @@ func (p *Player) decode(ffmpeg, url string, at time.Duration, eq []float64, spee
 	}
 	_ = writer.Close()
 	s := &session{
-		url: url, cmd: cmd, pipe: pipe, stderr: stderr,
+		input: input, cmd: cmd, pipe: pipe, stderr: stderr,
 		offset: at, speed: speed, done: make(chan struct{}), quit: make(chan struct{}), eq: newEqualizer(eq),
 	}
 	s.fade = newFadeReader(newEQReader(pipe, s.eq), func() *session { return p.upcoming(s) })
@@ -1090,7 +1118,7 @@ func (p *Player) audioFailure(s *session) error {
 // session is one decode: a child ffmpeg, the pipe it writes PCM to, and the
 // oto player reading that pipe.
 type session struct {
-	url string
+	input Source
 	// tag names a preloaded stream to the caller that asked for it.
 	tag    string
 	cmd    *exec.Cmd

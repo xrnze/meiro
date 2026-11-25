@@ -128,7 +128,7 @@ func indexDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(da
 
 // archiveDefault separates a previously retained copy from the new default.
 // The selected library is still on the other drive, even if archiving fails.
-func archiveDefault(ctx context.Context, target *os.Root, expected string) error {
+func archiveDefault(ctx context.Context, target *os.Root, expected string) (err error) {
 	data, err := readRegular(target, indexName)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -144,6 +144,18 @@ func archiveDefault(ctx context.Context, target *os.Root, expected string) error
 	if err := target.Mkdir(backup, 0o700); err != nil {
 		return fmt.Errorf("create download backup: %w", err)
 	}
+	var archived []string
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, name := range archived {
+			if _, statErr := target.Lstat(name); errors.Is(statErr, os.ErrNotExist) {
+				err = errors.Join(err, target.Rename(filepath.Join(backup, name), name))
+			}
+		}
+		_ = target.Remove(backup)
+	}()
 	for _, song := range lib.Songs {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -158,9 +170,19 @@ func archiveDefault(ctx context.Context, target *os.Root, expected string) error
 		if err := target.Rename(song.File, filepath.Join(backup, song.File)); err != nil {
 			return fmt.Errorf("archive download %q: %w", song.Item.Title, err)
 		}
+		archived = append(archived, song.File)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := target.Rename(indexName, filepath.Join(backup, indexName)); err != nil {
 		return fmt.Errorf("archive download index: %w", err)
+	}
+	if dir, err := target.OpenRoot(backup); err == nil {
+		if err := syncRoot(dir); err != nil {
+			log.Printf("syncing download backup: %v", err)
+		}
+		_ = dir.Close()
 	}
 	return nil
 }

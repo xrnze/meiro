@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/elianiva/meiro/internal/audio"
+	"github.com/elianiva/meiro/internal/offline"
 	"github.com/elianiva/meiro/internal/ytdlp"
+	"github.com/elianiva/meiro/player"
 	"github.com/elianiva/meiro/youtube"
 )
 
@@ -34,12 +36,15 @@ type resolvedAudio struct {
 	url       string
 	total     time.Duration
 	fromCache bool
+	validate  func(context.Context) error
 	// playErr is why the player could not open the audio, once found.
 	playErr error
 	// loudness is the track's loudness when it was looked up on the way.
 	loudness   youtube.Loudness
 	loudnessOK bool
 }
+
+func (r resolvedAudio) source() player.Source { return player.Source{URL: r.url, Validate: r.validate} }
 
 // streamAudio finds a track's audio off the main thread, in the cache or
 // with yt-dlp, and plays it.
@@ -89,7 +94,7 @@ func (a *app) streamAudio(item youtube.MusicItem, startAt time.Duration, changed
 		}
 		// Opening the audio device and starting ffmpeg take long enough to
 		// be felt, so they happen here and not on the main thread.
-		found.playErr = a.player.PlayAtContext(ctx, found.url, startAt, false)
+		found.playErr = a.player.PlaySourceContext(ctx, found.source(), startAt, false)
 		return found, nil
 	}, func(found resolvedAudio, err error) {
 		if found.loudnessOK {
@@ -240,7 +245,7 @@ func (a *app) syncPreload() {
 		if err != nil {
 			return preloadedAudio{}, err
 		}
-		return preloadedAudio{next.VideoID, found}, a.player.PreloadContext(ctx, next.VideoID, found.url)
+		return preloadedAudio{next.VideoID, found}, a.player.PreloadSourceContext(ctx, next.VideoID, found.source())
 	}, func(found preloadedAudio, err error) {
 		if err != nil {
 			log.Printf("playback: could not preload video_id=%s: %v", next.VideoID, err)
@@ -354,7 +359,7 @@ func (a *app) recoverStream(failure string) bool {
 		if err != nil || ctx.Err() != nil {
 			return found, err
 		}
-		found.playErr = a.player.PlayAtContext(ctx, found.url, at, paused)
+		found.playErr = a.player.PlaySourceContext(ctx, found.source(), at, paused)
 		return found, nil
 	}, func(found resolvedAudio, err error) {
 		if err == nil {
@@ -383,13 +388,21 @@ func (a *app) recoverStream(failure string) bool {
 func findAudio(ctx context.Context, streams *audio.URLs, item youtube.MusicItem, download downloadedAudio, cache *audio.Cache) (resolvedAudio, error) {
 	found := resolvedAudio{total: parseDuration(item.Duration)}
 	local := download.file
-	if local != "" && download.folder.ID != "" && !download.folder.Available(ctx) {
-		local = ""
-	}
 	if local != "" {
-		if info, err := os.Lstat(local); err != nil || !info.Mode().IsRegular() {
+		validate := func(ctx context.Context) error {
+			if download.folder.ID != "" && !download.folder.Available(ctx) {
+				return offline.ErrUnavailable
+			}
+			if info, err := os.Lstat(local); err != nil || !info.Mode().IsRegular() {
+				return offline.ErrUnavailable
+			}
+			return nil
+		}
+		if err := validate(ctx); err != nil {
 			log.Printf("playback: downloaded audio unavailable video_id=%s: %v", item.VideoID, err)
 			local = ""
+		} else {
+			found.validate = validate
 		}
 	}
 	path, ok := local, local != ""

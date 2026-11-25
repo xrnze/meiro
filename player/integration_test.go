@@ -123,6 +123,29 @@ func TestSeekRestartsTheDecodeAtThatPoint(t *testing.T) {
 	}
 }
 
+func TestReopeningAStreamChecksThatItsSourceStillExists(t *testing.T) {
+	p, wav := newTestPlayerWithDuration(t, 10)
+	gone := errors.New("source disconnected")
+	var unavailable bool
+	input := Source{URL: wav, Validate: func(context.Context) error {
+		if unavailable {
+			return gone
+		}
+		return nil
+	}}
+	if err := p.PlaySourceContext(t.Context(), input, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	unavailable = true
+	p.SeekContext(t.Context(), 4*time.Second)
+	if position := p.Position(); position >= 4*time.Second {
+		t.Errorf("seek reopened an unavailable source: %v", position)
+	}
+	if err := p.SetSpeed(t.Context(), 2); !errors.Is(err, gone) {
+		t.Errorf("speed change reopened an unavailable source: %v", err)
+	}
+}
+
 func TestSetSpeedGoesOnFromWhereTheStreamIs(t *testing.T) {
 	p, wav := newTestPlayerWithDuration(t, 10)
 	if err := p.Play(wav); err != nil {
