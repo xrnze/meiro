@@ -55,8 +55,10 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 			}
 			published := false
 			target := Folder{Dir: to, ID: "test-destination"}
-			kept, err := Move(t.Context(), Folder{Dir: from}, target, lib, func() (bool, error) {
+			var retainedDefault string
+			kept, err := Move(t.Context(), Folder{Dir: from}, target, lib, "", func(digest string) (bool, error) {
 				published = true
+				retainedDefault = digest
 				if _, err := os.Stat(filepath.Join(from, track.File)); err != nil {
 					t.Errorf("source disappeared before the location could be saved: %v", err)
 				}
@@ -103,6 +105,23 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 				if err := wrong.Remove(t.Context(), []string{track.File}); !errors.Is(err, ErrUnavailable) {
 					t.Errorf("removed files from another library: %v", err)
 				}
+				if scenario == "durability unconfirmed" {
+					reset := Folder{Dir: from}
+					publish := func(string) (bool, error) { return true, nil }
+					if _, err := Move(t.Context(), target, reset, lib, "wrong fingerprint", publish); err == nil {
+						t.Error("reset should not replace an unrelated library")
+					}
+					if _, err := Move(t.Context(), target, reset, lib, retainedDefault, publish); err != nil {
+						t.Fatalf("reset with the retained default: %v", err)
+					}
+					copies, err := filepath.Glob(filepath.Join(from, "Meiro Downloads backup *", track.File))
+					if err != nil || len(copies) != 1 {
+						t.Errorf("the former default was not kept as a backup: %q, %v", copies, err)
+					}
+					if got, err := reset.Open(t.Context()); err != nil || len(got.Songs) != 1 {
+						t.Errorf("default library not restored: %+v, %v", got.Songs, err)
+					}
+				}
 			default:
 				if _, err := os.Stat(to); !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("failed move left a destination: %v", err)
@@ -122,6 +141,16 @@ func TestOpenRejectsAnIndexThatReferencesUnmanagedFiles(t *testing.T) {
 	}
 	if _, err := folder.Open(t.Context()); err == nil {
 		t.Error("opened a custom library that references a file outside it")
+	}
+}
+
+func TestLibrarySnapshotKeepsThePreviousPlaylist(t *testing.T) {
+	var lib Library
+	lib.AddCollection(playlist("VLPLmove", "first"))
+	snapshot := lib
+	lib.SetCollectionTracks("VLPLmove", []string{"first", "second"})
+	if collection, _ := snapshot.Collection("VLPLmove"); !slices.Equal(collection.Tracks, []string{"first"}) {
+		t.Errorf("pending index snapshot changed: %q", collection.Tracks)
 	}
 }
 

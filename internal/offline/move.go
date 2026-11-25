@@ -3,6 +3,8 @@ package offline
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -14,9 +16,9 @@ import (
 	"github.com/elianiva/meiro/internal/fsutil"
 )
 
-// Move copies lib to to, then calls commit to publish the new location.
-// kept is true if durability could not be confirmed and the source was kept.
-func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool, error)) (kept bool, err error) {
+// Move copies lib to to, then calls commit to publish the new location and
+// record any default library left behind. kept reports unconfirmed durability.
+func Move(ctx context.Context, from, to Folder, lib Library, previousDefault string, commit func(string) (bool, error)) (kept bool, err error) {
 	resolved, err := filepath.EvalSymlinks(from.Dir)
 	if err != nil {
 		return false, fmt.Errorf("open current download folder: %w", err)
@@ -34,6 +36,17 @@ func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool
 		return false, fmt.Errorf("open current download folder: %w", err)
 	}
 	defer source.Close()
+	defaultIndex := previousDefault
+	if from.ID == "" {
+		data, err := readRegular(source, indexName)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("read current download index: %w", err)
+		}
+		defaultIndex = ""
+		if err == nil {
+			defaultIndex = indexDigest(data)
+		}
+	}
 	mkdirErr := os.Mkdir(to.Dir, 0o700)
 	created := mkdirErr == nil
 	if !created && (!errors.Is(mkdirErr, os.ErrExist) || to.ID != "") {
@@ -58,8 +71,10 @@ func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool
 	if !sameDirectory(target, to.Dir) {
 		return false, errors.New("the destination is not a regular directory")
 	}
-	if _, err := target.Lstat(indexName); !errors.Is(err, os.ErrNotExist) {
-		return false, errors.New("the destination already contains a download index")
+	if !created {
+		if err := archiveDefault(ctx, target, previousDefault); err != nil {
+			return false, err
+		}
 	}
 
 	for _, song := range lib.Songs {
@@ -96,7 +111,7 @@ func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool
 	if !sameDirectory(target, to.Dir) {
 		return false, errors.New("the destination drive is no longer available")
 	}
-	durable, err := commit()
+	durable, err := commit(defaultIndex)
 	if err != nil {
 		return false, fmt.Errorf("save download folder: %w", err)
 	}
@@ -107,6 +122,47 @@ func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool
 	}
 	retire(source, resolved, retired, true)
 	return false, nil
+}
+
+func indexDigest(data []byte) string { return fmt.Sprintf("%x", sha256.Sum256(data)) }
+
+// archiveDefault separates a previously retained copy from the new default.
+// The selected library is still on the other drive, even if archiving fails.
+func archiveDefault(ctx context.Context, target *os.Root, expected string) error {
+	data, err := readRegular(target, indexName)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || expected == "" || indexDigest(data) != expected {
+		return errors.New("the default folder already contains a different download index")
+	}
+	lib, err := decodeLibrary(data)
+	if err != nil {
+		return fmt.Errorf("read retained download library: %w", err)
+	}
+	backup := "Meiro Downloads backup " + rand.Text()
+	if err := target.Mkdir(backup, 0o700); err != nil {
+		return fmt.Errorf("create download backup: %w", err)
+	}
+	for _, song := range lib.Songs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := target.Lstat(song.File)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("cannot archive download %q", song.Item.Title)
+		}
+		if err := target.Rename(song.File, filepath.Join(backup, song.File)); err != nil {
+			return fmt.Errorf("archive download %q: %w", song.Item.Title, err)
+		}
+	}
+	if err := target.Rename(indexName, filepath.Join(backup, indexName)); err != nil {
+		return fmt.Errorf("archive download index: %w", err)
+	}
+	return nil
 }
 
 func copyTrack(ctx context.Context, source, target *os.Root, name string) error {

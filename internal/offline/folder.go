@@ -72,6 +72,14 @@ func (f Folder) Open(ctx context.Context) (Library, error) {
 	if err != nil {
 		return Library{}, err
 	}
+	lib, err := decodeLibrary(data)
+	if err == nil {
+		sweepTemps(root)
+	}
+	return lib, err
+}
+
+func decodeLibrary(data []byte) (Library, error) {
 	var lib Library
 	if err := json.Unmarshal(data, &lib); err != nil {
 		return Library{}, err
@@ -82,7 +90,6 @@ func (f Folder) Open(ctx context.Context) (Library, error) {
 		}
 	}
 	lib.reindex()
-	sweepTemps(root)
 	return lib, nil
 }
 

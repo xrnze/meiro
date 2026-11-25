@@ -131,6 +131,7 @@ func (l *Library) AddCollection(c Collection) {
 func (l *Library) SetCollectionTracks(id string, tracks []string) bool {
 	for i := range l.Collections {
 		if l.Collections[i].ID() == id {
+			l.Collections = slices.Clone(l.Collections)
 			l.Collections[i].Tracks = tracks
 			return true
 		}

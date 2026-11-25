@@ -19,6 +19,11 @@ import (
 
 const downloadFolderUnavailable = "Download folder is unavailable. Reconnect the drive to use your downloads."
 
+type downloadLocation struct {
+	offline.Folder
+	DefaultBackup string `json:"defaultBackup,omitempty"`
+}
+
 // The location is committed independently of the debounced settings writer so
 // a failed preference write cannot leave the old library deleted.
 func (a *app) setupDownloadLocation(data string) {
@@ -30,16 +35,16 @@ func (a *app) setupDownloadLocation(data string) {
 		a.openDownloads(d.defaultDir)
 		return
 	}
-	var folder offline.Folder
+	var saved downloadLocation
 	if err == nil {
-		err = json.Unmarshal(location, &folder)
+		err = json.Unmarshal(location, &saved)
 	}
-	if err != nil || !filepath.IsAbs(folder.Dir) || folder.ID == "" {
+	if err != nil || !filepath.IsAbs(saved.Dir) || saved.ID == "" {
 		d.locationErr = "Could not read the saved download location."
 		log.Printf("reading download location: %v", err)
 		return
 	}
-	d.dir, d.locationID = filepath.Clean(folder.Dir), folder.ID
+	d.dir, d.locationID, d.defaultBackup = filepath.Clean(saved.Dir), saved.ID, saved.DefaultBackup
 }
 
 func (d *downloads) custom() bool { return d.locationID != "" }
@@ -195,14 +200,21 @@ func (a *app) moveDownloadFolder(to string) {
 	}
 	done := make(chan struct{})
 	d.moveDone = done
-	startTask(a, &d.move, noTimeout, func(ctx context.Context) (bool, error) {
+	previousDefault := d.defaultBackup
+	type result struct {
+		kept          bool
+		defaultBackup string
+	}
+	startTask(a, &d.move, noTimeout, func(ctx context.Context) (result, error) {
 		defer close(done)
 		d.writer.Wait()
-		return offline.Move(ctx, from, target, lib, func() (bool, error) {
+		saved := downloadLocation{Folder: target}
+		kept, err := offline.Move(ctx, from, target, lib, previousDefault, func(defaultIndex string) (bool, error) {
 			var data []byte
 			if target.ID != "" {
 				var err error
-				data, err = json.Marshal(target)
+				saved.DefaultBackup = defaultIndex
+				data, err = json.Marshal(saved)
 				if err != nil {
 					return false, err
 				}
@@ -212,7 +224,8 @@ func (a *app) moveDownloadFolder(to string) {
 			}
 			return fsutil.SyncDir(ctx, filepath.Dir(file)) == nil, nil
 		})
-	}, func(kept bool, err error) {
+		return result{kept: kept, defaultBackup: saved.DefaultBackup}, err
+	}, func(moved result, err error) {
 		d.moveDone = nil
 		if errors.Is(err, offline.ErrUnavailable) && d.custom() {
 			d.setAvailable(false)
@@ -222,9 +235,9 @@ func (a *app) moveDownloadFolder(to string) {
 			d.locationErr = "Could not move downloads: " + err.Error()
 			return
 		}
-		d.dir, d.locationID = to, target.ID
+		d.dir, d.locationID, d.defaultBackup = to, target.ID, moved.defaultBackup
 		d.version++
-		if kept {
+		if moved.kept {
 			a.notice = "Downloads moved. Meiro kept the old copy because it could not confirm the move was safely written to disk."
 		}
 	})

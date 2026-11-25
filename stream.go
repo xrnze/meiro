@@ -380,8 +380,12 @@ func (a *app) recoverStream(failure string) bool {
 
 // findAudio is where a track's audio is: in local, the file it was downloaded
 // to, if that is still there, in the cache, or from yt-dlp.
-func findAudio(ctx context.Context, streams *audio.URLs, item youtube.MusicItem, local string, cache *audio.Cache) (resolvedAudio, error) {
+func findAudio(ctx context.Context, streams *audio.URLs, item youtube.MusicItem, download downloadedAudio, cache *audio.Cache) (resolvedAudio, error) {
 	found := resolvedAudio{total: parseDuration(item.Duration)}
+	local := download.file
+	if local != "" && download.folder.ID != "" && !download.folder.Available(ctx) {
+		local = ""
+	}
 	if local != "" {
 		if info, err := os.Lstat(local); err != nil || !info.Mode().IsRegular() {
 			log.Printf("playback: downloaded audio unavailable video_id=%s: %v", item.VideoID, err)

@@ -34,6 +34,7 @@ type downloads struct {
 
 	defaultDir, locationFile string
 	locationID, locationErr  string
+	defaultBackup            string
 	available, loaded        bool
 	choosing                 bool
 	moveDone                 chan struct{}
@@ -77,24 +78,19 @@ func (a *app) openDownloads(dir string) {
 
 func (d *downloads) writable() bool { return d.available && !d.move.busy() && !d.installing }
 
-// downloaded is the file of a downloaded track, or "".
-func (a *app) downloaded(videoID string) string {
+type downloadedAudio struct {
+	folder offline.Folder
+	file   string
+}
+
+func (a *app) useDownloadAudio(videoID string) (downloadedAudio, func()) {
 	d := &a.downloads
 	song, ok := d.lib.Song(videoID)
 	if !ok || !d.available || d.move.busy() {
-		return ""
+		return downloadedAudio{}, func() {}
 	}
-	return filepath.Join(d.dir, song.File)
-}
-
-func (a *app) useDownloadAudio(videoID string) (string, func()) {
-	file := a.downloaded(videoID)
-	if file == "" {
-		return "", func() {}
-	}
-	d := &a.downloads
 	d.files.Add(1)
-	return file, func() { d.files.Add(-1) }
+	return downloadedAudio{folder: d.folder(), file: filepath.Join(d.dir, song.File)}, func() { d.files.Add(-1) }
 }
 
 // isDownloaded reports whether a track is downloaded.
