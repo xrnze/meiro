@@ -2,7 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "offline",
-    srcs = ["offline.go"],
+    srcs = [
+        "move.go",
+        "offline.go",
+    ],
     importpath = "github.com/elianiva/meiro/internal/offline",
     visibility = ["//:__subpackages__"],
     deps = [

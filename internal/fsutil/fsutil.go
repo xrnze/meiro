@@ -11,10 +11,15 @@ import (
 // file or the new one, never half of one: it goes to a temporary file in the
 // same directory, is synced, and replaces the old file by a rename. The
 // directory is created, private to the user, when it is missing.
-func WriteFileAtomic(path string, data []byte, perm os.FileMode) (err error) {
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	return WriteFileAtomicInDir(path, data, perm)
+}
+
+// WriteFileAtomicInDir replaces path atomically without creating its directory.
+func WriteFileAtomicInDir(path string, data []byte, perm os.FileMode) (err error) {
 	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err

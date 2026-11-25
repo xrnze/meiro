@@ -58,6 +58,132 @@ func audioFiles(t *testing.T, dir string) []string {
 	return names
 }
 
+func downloadFolderSettings(t *testing.T, a *app) *ui.Tester {
+	t.Helper()
+	a.router.Push("/settings")
+	tt := ui.NewTester(a.view, 1000, 900)
+	tt.Frame()
+	if err := tt.Click("Search settings"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Type("download folder")
+	tt.Frame()
+	return tt
+}
+
+func TestSettingsShowsDefaultDownloadFolder(t *testing.T) {
+	a := newTestApp(t)
+	dir := filepath.Join(t.TempDir(), "Downloads")
+	a.setupDownloadLocation(filepath.Dir(dir))
+	a.downloads.pickFolder = func(string) (string, error) { return "", nil }
+	tt := downloadFolderSettings(t, a)
+	if !tt.HasText("Download folder") || !tt.HasText(dir) {
+		t.Fatalf("Settings should show the current download folder: %q", tt.Texts())
+	}
+	if err := tt.Click("Choose download folder"); err != nil {
+		t.Fatalf("Settings should offer a folder picker: %v", err)
+	}
+}
+
+func TestChangingDownloadFolderMovesTheOfflineLibrary(t *testing.T) {
+	mediaURL := downloadTone(t)
+	a, r := playbackApp(t)
+	data, selected := t.TempDir(), t.TempDir()
+	from, to := filepath.Join(data, "Downloads"), filepath.Join(selected, "Meiro Downloads")
+	a.setupDownloadLocation(data)
+	a.downloads.pickFolder = func(string) (string, error) { return selected, nil }
+	r.url = func(string, int) (string, error) { return mediaURL, nil }
+	a.router.Push("/album/MPREb_test")
+	tt := ui.NewTester(a.view, 1000, 900)
+	tt.Frame()
+	if err := tt.Click("Download"); err != nil {
+		t.Fatal(err)
+	}
+	a.downloads.writer.Wait()
+	if files := audioFiles(t, from); len(files) != 1 {
+		t.Fatalf("download before the move: %q", files)
+	}
+	tt = downloadFolderSettings(t, a)
+	if err := tt.Click("Choose download folder"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText(to) || len(audioFiles(t, to)) != 1 || len(audioFiles(t, from)) != 0 {
+		t.Fatalf("library did not move: %q, origin=%q destination=%q", tt.Texts(), audioFiles(t, from), audioFiles(t, to))
+	}
+
+	// Start offline with the selected drive absent, then reconnect it.
+	away := filepath.Join(selected, "disconnected")
+	if err := os.Rename(to, away); err != nil {
+		t.Fatal(err)
+	}
+	a, r = playbackApp(t)
+	a.setupDownloadLocation(data)
+	r.url = func(string, int) (string, error) { return "", errors.New("offline") }
+	a.account.public = youtube.NewClient(youtube.Options{APIKey: "test", HTTPClient: &http.Client{Transport: unreachable{}}})
+	a.router.Push("/downloads")
+	tt = ui.NewTester(a.view, 1000, 900)
+	tt.Frame()
+	if !tt.HasText("Download folder is unavailable. Reconnect the drive to use your downloads.") {
+		t.Errorf("Downloads should explain why the folder is unavailable: %q", tt.Texts())
+	}
+	for _, dir := range []string{to, from} {
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Meiro should not create a replacement folder at %q: %v", dir, err)
+		}
+	}
+	if err := os.Rename(away, to); err != nil {
+		t.Fatal(err)
+	}
+	a.checkDownloadFolder() // the periodic drive check
+	tt.Frame()
+	if err := tt.Click("Album Track One"); err != nil {
+		t.Fatalf("reconnected track missing: %v (%q)", err, tt.Texts())
+	}
+	if a.playErr != "" || r.asked("vid-3") || !a.player.Active() {
+		t.Fatalf("moved track did not play offline: %q, resolved=%t", a.playErr, r.asked("vid-3"))
+	}
+	tt = downloadFolderSettings(t, a)
+	if !tt.HasText("Wait for downloads or offline playback to finish before moving the folder.") {
+		t.Errorf("the offline decoder should block the move: %q", tt.Texts())
+	}
+	a.player.Stop()
+	tt.Frame()
+	if err := tt.Click("Reset download folder"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText(from) || len(audioFiles(t, from)) != 1 || len(audioFiles(t, to)) != 0 {
+		t.Fatalf("reset did not move the offline library back: %q", tt.Texts())
+	}
+}
+
+func TestChangingDownloadFolderDoesNotStopStreaming(t *testing.T) {
+	a, r := tonesApp(t, 30)
+	a.setupDownloadLocation(t.TempDir())
+	selected := t.TempDir()
+	a.downloads.pickFolder = func(string) (string, error) { return selected, nil }
+	a.router.Push("/album/MPREb_test")
+	tt := ui.NewTester(a.view, 1000, 900)
+	tt.Frame()
+	if err := tt.Click("Album Track One"); err != nil {
+		t.Fatal(err)
+	}
+	pollUntil(t, a, "playing the resolved stream", func() bool { return a.player.Playing() && a.player.Position() > 0 })
+	if !r.asked("vid-3") {
+		t.Fatal("the track did not come from the stream resolver")
+	}
+	position := a.player.Position()
+	tt = downloadFolderSettings(t, a)
+	if err := tt.Click("Choose download folder"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText(filepath.Join(selected, "Meiro Downloads")) || !a.player.Playing() || a.player.Position() < position {
+		t.Errorf("the folder should change without stopping the streamed song: %q", tt.Texts())
+	}
+}
+
 // An album downloaded from its page opens, lists and plays with no network,
 // and removing the download deletes its audio.
 func TestADownloadedAlbumPlaysOffline(t *testing.T) {

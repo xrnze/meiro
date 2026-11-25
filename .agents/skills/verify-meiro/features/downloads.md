@@ -8,6 +8,7 @@ A user downloads songs, albums and playlists, then plays them with no network. T
 - `download-collection` downloads an album or playlist from its page's Download button, which then reads Downloading n/m and Downloaded. Clicking it again removes the download. Album and playlist cards and rows offer Download and Remove download in their menu. A downloaded album or playlist fetches the songs added to it since it was downloaded, when its page next loads.
 - `downloads-page` lists the downloaded albums and playlists, then the songs, and plays from them.
 - `downloads-offline` plays a downloaded song from its file without resolving it, and opens a downloaded album or playlist from its download when the network fails.
+- `download-folder` moves that library to a folder the user chooses, or back to Meiro's default folder.
 
 ## How to get to it (user POV)
 
@@ -15,6 +16,7 @@ A user downloads songs, albums and playlists, then plays them with no network. T
 - Open an album or playlist and click Download beside Play and Shuffle.
 - Click Downloads in the navigation rail.
 - Disconnect, open Downloads, open an album and play a song.
+- In Settings, search for Download folder. Choose a location, or reset to the default.
 
 ## Driving it with the headless tester
 
@@ -25,6 +27,8 @@ Preconditions:
 - Give `playbackApp(t)` a resolver URL served by `httptest`, so the download saves real bytes.
 - `TestADownloadedAlbumPlaysOffline` downloads the album, checks that the album page keeps its own content after a visit to Downloads, restarts the app on the same folder with every request failing, opens the album from Downloads, plays it without resolving, and removes the download.
 - `TestADownloadedPlaylistPicksUpASongAddedLater` downloads a playlist, adds a song to the fake's page, reopens the playlist from Downloads, and checks that the new song is fetched without fetching the old one again and that the offline page lists both.
+- `TestChangingDownloadFolderMovesTheOfflineLibrary` downloads an album, selects a folder through the Settings control with a fake system picker, restarts with the folder unavailable, then reconnects and plays the saved song offline. The test resets to the default after playback stops.
+- `offline.TestMovePublishesOnlyACompleteLibrary` covers the filesystem transaction and rejected moves.
 - `offline.TestRemovingACollectionKeepsSongsWantedElsewhere` and `offline.TestReadKeepsListedSongsAndSweepsUnlistedAudio` cover the index.
 
 ## Gotchas
@@ -32,4 +36,4 @@ Preconditions:
 - `a.run` is inline in tests, so a download finishes inside the click. The Downloading n/m state is not visible headless.
 - The headless tester draws a page it navigated to blank after a router push from another page, before and after this feature. The text tree is still right. Open a new `ui.NewTester` on the page to capture it.
 - The hero button and the song menu both say Download: `tt.Click("Download")` finds the hero button first on an album page.
-- Native check: the menu Download on a real song saves a WebM file under `Downloads/` in the app's data folder, and playing it logs `playback: playing downloaded audio`.
+- Native check: the menu Download on a real song saves a WebM file under `Downloads/` in the app's data folder, and playing it logs `playback: playing downloaded audio`. Move the library with the real picker to a second drive and verify it plays after disconnecting and reconnecting that drive.

@@ -53,9 +53,10 @@ func (a *app) streamAudio(item youtube.MusicItem, startAt time.Duration, changed
 	volume, normalize, logarithmic := a.volume, a.settings.NormalizeLoudness, a.settings.LogVolume
 	speed := a.speedFor(item)
 	streams := a.streams
-	local := a.downloaded(item.VideoID)
+	local, release := a.useDownloadAudio(item.VideoID)
 	log.Printf("playback: resolving video_id=%s", item.VideoID)
 	startTask(a, &a.stream, audio.ResolveTimeout, func(ctx context.Context) (resolvedAudio, error) {
+		defer release()
 		a.player.Stop()
 		if err := a.player.SetSpeed(ctx, speed); err != nil {
 			return resolvedAudio{}, err
@@ -227,10 +228,11 @@ func (a *app) syncPreload() {
 		return
 	}
 	cache := a.currentAudioCache()
-	local := a.downloaded(next.VideoID)
+	local, release := a.useDownloadAudio(next.VideoID)
 	a.preloadFor = next.VideoID
 	a.fetchLoudness(next, &a.preloadLoudnessLoad)
 	startTask(a, &a.preload, audio.ResolveTimeout, func(ctx context.Context) (preloadedAudio, error) {
+		defer release()
 		found, err := findAudio(ctx, a.streams, next, local, cache)
 		if err == nil {
 			err = ctx.Err()
@@ -339,10 +341,11 @@ func (a *app) recoverStream(failure string) bool {
 	}
 	paused, bySleep := a.player.Paused(), a.suspendedWhilePlaying
 	cache := a.currentAudioCache()
-	local := a.downloaded(item.VideoID)
+	local, release := a.useDownloadAudio(item.VideoID)
 	log.Printf("playback: stream broke off video_id=%s at=%s attempt=%d/%d: %s", item.VideoID, at.Round(time.Second), attempt, maxRecoveries, failure)
 	a.fetchLoudness(item, &a.loudnessLoad)
 	startTask(a, &a.stream, audio.ResolveTimeout+time.Duration(attempt)*recoveryBackoff, func(ctx context.Context) (resolvedAudio, error) {
+		defer release()
 		if err := a.sleep(ctx, time.Duration(attempt)*recoveryBackoff); err != nil {
 			return resolvedAudio{}, err
 		}
@@ -380,7 +383,7 @@ func (a *app) recoverStream(failure string) bool {
 func findAudio(ctx context.Context, streams *audio.URLs, item youtube.MusicItem, local string, cache *audio.Cache) (resolvedAudio, error) {
 	found := resolvedAudio{total: parseDuration(item.Duration)}
 	if local != "" {
-		if _, err := os.Stat(local); err != nil {
+		if info, err := os.Lstat(local); err != nil || !info.Mode().IsRegular() {
 			log.Printf("playback: downloaded audio unavailable video_id=%s: %v", item.VideoID, err)
 			local = ""
 		}

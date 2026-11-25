@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -55,27 +56,46 @@ type Collection struct {
 // ID is the browse ID of the collection's page.
 func (c Collection) ID() string { return c.Item.Target().ID }
 
-// Read reads the index of the downloads folder dir. A missing or unreadable
-// index is an empty library. It also removes what downloads an earlier run
-// stopped left behind.
-func Read(dir string) Library {
-	proc.SweepStale(dir, nil, ".audio-")
+// Open reads and validates an existing library before cleaning up files
+// left behind by interrupted downloads.
+func Open(ctx context.Context, dir string) (Library, error) {
+	if err := ctx.Err(); err != nil {
+		return Library{}, err
+	}
+	path := filepath.Join(dir, indexName)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Library{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return Library{}, errors.New("download index is not a regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Library{}, err
+	}
 	var lib Library
-	data, err := os.ReadFile(filepath.Join(dir, indexName))
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-	case err != nil:
-		log.Printf("reading downloads: %v", err)
-		return lib
-	default:
-		if err := json.Unmarshal(data, &lib); err != nil {
-			log.Printf("downloads index in %s is not readable, starting fresh: %v", dir, err)
-			return Library{}
+	if err := json.Unmarshal(data, &lib); err != nil {
+		return Library{}, err
+	}
+	for _, song := range lib.Songs {
+		if !managedFile(song) {
+			return Library{}, fmt.Errorf("unexpected file name for %q", song.Item.Title)
 		}
 	}
+	proc.SweepStale(dir, nil, ".audio-")
 	lib.reindex()
 	lib.sweep(dir)
-	return lib
+	return lib, nil
+}
+
+// Available reports whether the download index is present at dir.
+func Available(ctx context.Context, dir string) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(dir, indexName))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // sweep deletes the audio files in dir that the library does not list: the
@@ -106,17 +126,21 @@ func (l *Library) sweep(dir string) {
 
 // Write replaces the index of the downloads folder dir atomically.
 func Write(dir string, lib Library) error {
+	data, err := encode(lib)
+	if err != nil {
+		return err
+	}
+	return fsutil.WriteFileAtomicInDir(filepath.Join(dir, indexName), data, 0o600)
+}
+
+func encode(lib Library) ([]byte, error) {
 	if lib.Songs == nil {
 		lib.Songs = []Song{}
 	}
 	if lib.Collections == nil {
 		lib.Collections = []Collection{}
 	}
-	data, err := json.Marshal(lib)
-	if err != nil {
-		return err
-	}
-	return fsutil.WriteFileAtomic(filepath.Join(dir, indexName), data, 0o600)
+	return json.Marshal(lib)
 }
 
 func (l *Library) reindex() {
@@ -242,20 +266,26 @@ func (l *Library) Tracks(c Collection) []youtube.MusicItem {
 // Download saves the audio at streamURL as the file of a track in the
 // downloads folder dir, and returns the file's name.
 func Download(ctx context.Context, dir, videoID, streamURL string) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
 	temp, err := audio.Fetch(ctx, streamURL, dir)
 	if err != nil {
 		return "", err
 	}
 	defer fsutil.RemoveAll(filepath.Dir(temp))
-	sum := sha256.Sum256([]byte(videoID))
-	name := hex.EncodeToString(sum[:]) + filepath.Ext(temp)
+	name := audioKey(videoID) + filepath.Ext(temp)
 	if err := os.Rename(temp, filepath.Join(dir, name)); err != nil {
 		return "", err
 	}
 	return name, nil
+}
+
+func managedFile(song Song) bool {
+	name := song.File
+	return filepath.IsLocal(name) && filepath.Base(name) == name && strings.HasPrefix(name, audioKey(song.Item.VideoID)+".")
+}
+
+func audioKey(videoID string) string {
+	sum := sha256.Sum256([]byte(videoID))
+	return hex.EncodeToString(sum[:])
 }
 
 // Writer writes the index off the main thread, one write at a time, so two

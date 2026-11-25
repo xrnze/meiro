@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -29,6 +30,13 @@ type downloads struct {
 	dir    string
 	lib    offline.Library
 	writer offline.Writer
+	files  atomic.Int32
+
+	defaultDir, locationFile string
+	available, choosing      bool
+	locationErr              string
+	move, probe              task
+	pickFolder               func(string) (string, error)
 	// queue is the tracks waiting, and active the one being downloaded.
 	queue  []pendingSong
 	active pendingSong
@@ -45,27 +53,51 @@ type pendingSong struct {
 	single bool
 }
 
-// openDownloads reads what was downloaded into dir.
+// openDownloads opens the local default folder. Only the default can start
+// with no index; a custom folder must already hold its library.
 func (a *app) openDownloads(dir string) {
-	a.downloads.dir = dir
-	a.downloads.lib = offline.Read(dir)
-	a.downloads.version++
+	d := &a.downloads
+	d.dir = dir
+	d.version++
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		d.locationErr = "Could not open the download folder: " + err.Error()
+		return
+	}
+	lib, err := offline.Open(context.Background(), dir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		d.locationErr = "Could not read the download library: " + err.Error()
+		return
+	}
+	d.lib = lib
+	d.available = true
 }
+
+func (d *downloads) writable() bool { return d.available && !d.move.busy() }
 
 // downloaded is the file of a downloaded track, or "".
 func (a *app) downloaded(videoID string) string {
 	d := &a.downloads
 	song, ok := d.lib.Song(videoID)
-	if !ok || d.dir == "" {
+	if !ok || !d.writable() {
 		return ""
 	}
 	return filepath.Join(d.dir, song.File)
 }
 
+func (a *app) useDownloadAudio(videoID string) (string, func()) {
+	file := a.downloaded(videoID)
+	if file == "" {
+		return "", func() {}
+	}
+	d := &a.downloads
+	d.files.Add(1)
+	return file, func() { d.files.Add(-1) }
+}
+
 // isDownloaded reports whether a track is downloaded.
 func (a *app) isDownloaded(videoID string) bool {
 	_, ok := a.downloads.lib.Song(videoID)
-	return ok
+	return ok && a.downloads.available
 }
 
 // downloading reports whether a track is waiting or being downloaded.
@@ -79,7 +111,7 @@ func (a *app) downloading(videoID string) bool {
 
 // canDownload reports whether a song can be downloaded or removed.
 func (a *app) canDownload(item youtube.MusicItem) bool {
-	return a.downloads.dir != "" && item.VideoID != "" && item.IsTrack()
+	return a.downloads.writable() && item.VideoID != "" && item.IsTrack()
 }
 
 // downloadSong saves a track to play offline.
@@ -92,7 +124,7 @@ func (a *app) downloadSong(item youtube.MusicItem) {
 // collection's.
 func (a *app) downloadCollection(item youtube.MusicItem, tracks []youtube.MusicItem) {
 	d := &a.downloads
-	if d.dir == "" || len(tracks) == 0 {
+	if !d.writable() || len(tracks) == 0 {
 		return
 	}
 	songs := make([]youtube.MusicItem, 0, len(tracks))
@@ -117,7 +149,7 @@ func (a *app) downloadCollection(item youtube.MusicItem, tracks []youtube.MusicI
 // of a playlist that has loaded can be synced before the rest arrives.
 func (a *app) syncCollectionDownload(p *pageData, r *route, id string) {
 	d := &a.downloads
-	if d.dir == "" || (r.id != routeAlbum && r.id != routePlaylist) || p.feed.loading || p.feed.err != "" {
+	if !d.writable() || (r.id != routeAlbum && r.id != routePlaylist) || p.feed.loading || p.feed.err != "" {
 		return
 	}
 	collection, ok := d.lib.Collection(id)
@@ -175,7 +207,7 @@ func pageTracks(feed pageState) []youtube.MusicItem {
 // queueDownloads puts the tracks that are not downloaded yet in the queue.
 func (a *app) queueDownloads(items []youtube.MusicItem, single bool) {
 	d := &a.downloads
-	if d.dir == "" {
+	if !d.writable() {
 		return
 	}
 	for _, item := range items {
@@ -207,13 +239,19 @@ func (a *app) queueDownloads(items []youtube.MusicItem, single bool) {
 // one is under way.
 func (a *app) nextDownload() {
 	d := &a.downloads
-	if d.job.busy() || len(d.queue) == 0 {
+	if !d.writable() || d.job.busy() || len(d.queue) == 0 {
 		return
 	}
 	d.active = d.queue[0]
 	d.queue = slices.Delete(d.queue, 0, 1)
 	item, dir, streams := d.active.item, d.dir, a.streams
+	custom := d.custom()
+	d.files.Add(1)
 	startTask(a, &d.job, downloadTimeout, func(ctx context.Context) (string, error) {
+		defer d.files.Add(-1)
+		if custom && !offline.Available(ctx, dir) {
+			return "", errDownloadFolderUnavailable
+		}
 		url, _, err := streams.Get(ctx, item.VideoID)
 		if err != nil {
 			return "", err
@@ -223,9 +261,18 @@ func (a *app) nextDownload() {
 			// A URL kept from earlier may have expired: the next try
 			// resolves the track again.
 			streams.Forget(item.VideoID)
+			if custom && ctx.Err() == nil && !offline.Available(ctx, dir) {
+				return "", errDownloadFolderUnavailable
+			}
 		}
 		return file, err
 	}, func(file string, err error) {
+		if errors.Is(err, errDownloadFolderUnavailable) {
+			d.queue = slices.Insert(d.queue, 0, d.active)
+			d.active = pendingSong{}
+			d.setAvailable(false)
+			return
+		}
 		single := d.active.single
 		d.active = pendingSong{}
 		if err != nil {
@@ -243,6 +290,9 @@ func (a *app) nextDownload() {
 // downloaded.
 func (a *app) removeDownload(videoID string) {
 	d := &a.downloads
+	if !d.writable() {
+		return
+	}
 	d.queue = slices.DeleteFunc(d.queue, func(p pendingSong) bool { return p.item.VideoID == videoID })
 	if d.job.busy() && d.active.item.VideoID == videoID {
 		d.job.stop()
@@ -259,6 +309,9 @@ func (a *app) removeDownload(videoID string) {
 // tracks that were downloaded only for it, and stops the ones still waiting.
 func (a *app) removeCollectionDownload(id string) {
 	d := &a.downloads
+	if !d.writable() {
+		return
+	}
 	collection, ok := d.lib.Collection(id)
 	if !ok {
 		return
@@ -299,11 +352,14 @@ func (a *app) collectionDownload(id string) (done, total int, saved, busy bool) 
 // deleteDownloadFiles deletes the files of removed tracks, off the main
 // thread.
 func (a *app) deleteDownloadFiles(files []string) {
-	dir := a.downloads.dir
+	d := &a.downloads
+	dir := d.dir
 	if len(files) == 0 || dir == "" {
 		return
 	}
+	d.files.Add(1)
 	a.run(func() {
+		defer d.files.Add(-1)
 		for _, file := range files {
 			if err := os.Remove(filepath.Join(dir, file)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				log.Printf("downloads: removing %s: %v", file, err)
@@ -324,7 +380,7 @@ func (a *app) saveDownloads() {
 func (a *app) offlinePage(id string) (*youtube.BrowseResult, bool) {
 	d := &a.downloads
 	collection, ok := d.lib.Collection(id)
-	if !ok {
+	if !ok || !d.available {
 		return nil, false
 	}
 	return &youtube.BrowseResult{
@@ -343,6 +399,10 @@ func (a *app) syncDownloadsPage() {
 		return
 	}
 	p.downloads, p.loadedAt, p.rowsDirty = d.version, time.Now(), true
+	if d.locationFile != "" && !d.available {
+		p.feed = pageState{err: d.unavailableMessage()}
+		return
+	}
 	var sections []youtube.MusicSection
 	if len(d.lib.Collections) > 0 {
 		items := make([]youtube.MusicItem, len(d.lib.Collections))
@@ -389,7 +449,7 @@ func (a *app) pageDownload() (pageDownloadState, string, bool) {
 	}
 	// A playlist's songs past its first page are still on their way while
 	// the rest of it loads, and a download now would leave them out.
-	state.disabled = !busy && !complete && (len(a.page.playable) == 0 || a.pageSimilar.busy() || a.page.feed.loading)
+	state.disabled = !a.downloads.writable() || !busy && !complete && (len(a.page.playable) == 0 || a.pageSimilar.busy() || a.page.feed.loading)
 	return state, id, true
 }
 

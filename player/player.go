@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -458,6 +459,19 @@ func (p *Player) Volume() float64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.volume
+}
+
+// CanMoveFilesIn reports whether dir can be moved without disrupting a
+// loaded or preloaded stream. A playback transition must finish first.
+func (p *Player) CanMoveFilesIn(dir string) bool {
+	if !p.ctl.TryLock() {
+		return false
+	}
+	defer p.ctl.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	inDir := func(s *session) bool { return s != nil && filepath.Dir(s.url) == dir }
+	return !inDir(p.session) && !inDir(p.next)
 }
 
 // Active reports whether a stream is loaded, playing, paused or ended.

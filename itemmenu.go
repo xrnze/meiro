@@ -108,7 +108,7 @@ func (a *app) cardMenu(c *ui.Context, anchor ui.Element, key string, item youtub
 			a.startRadio(item, key)
 			close()
 		}
-		if (target.Kind == youtube.TargetAlbum || target.Kind == youtube.TargetPlaylist) && a.downloads.dir != "" {
+		if (target.Kind == youtube.TargetAlbum || target.Kind == youtube.TargetPlaylist) && a.downloads.writable() {
 			if _, _, saved, _ := a.collectionDownload(target.ID); saved {
 				if m3.MenuItem(c, "Remove download", m3.IconDelete).Clicked() {
 					a.removeCollectionDownload(target.ID)

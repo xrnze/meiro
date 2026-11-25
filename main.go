@@ -100,6 +100,8 @@ func main() {
 		a.every(30*time.Second, debug.FreeOSMemory)
 		a.watchSettings()
 		a.watchSession()
+		a.checkDownloadFolder()
+		a.every(2*time.Second, func() { a.update(a.checkDownloadFolder) })
 		a.every(flushInterval, func() { a.update(a.flushScrobbles) })
 		a.desktop.win.OnClosed(a.stopTicking)
 	})
@@ -201,7 +203,7 @@ func (a *app) setup() {
 		a.songs = videosong.Open(filepath.Join(directory, "video-songs.json"))
 		a.openScrobbler(secretfile.File{Path: filepath.Join(directory, "lastfm-session.txt"), Keychain: mygo.Secrets, Name: credentialsKey}, filepath.Join(directory, "lastfm-pending.json"))
 		a.openCredits(filepath.Join(directory, "credits.json"))
-		a.openDownloads(filepath.Join(directory, "Downloads"))
+		a.setupDownloadLocation(directory)
 	} else {
 		a.account.signIn.err = err.Error()
 	}
@@ -276,6 +278,8 @@ func (a *app) shutdown() {
 	a.savePlayback(0)
 	a.saver.Wait()
 	a.historyWriter.Wait()
+	a.downloads.move.stop()
+	a.downloads.probe.stop()
 	a.downloads.writer.Wait()
 	a.playSave.writer.Wait()
 	a.songs.Wait()
