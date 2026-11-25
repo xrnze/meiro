@@ -33,14 +33,17 @@ type downloads struct {
 	files  atomic.Int32
 
 	defaultDir, locationFile string
-	available, choosing      bool
-	locationErr              string
+	locationID, locationErr  string
+	available, loaded        bool
+	choosing                 bool
+	moveDone                 chan struct{}
 	move, probe              task
 	pickFolder               func(string) (string, error)
 	// queue is the tracks waiting, and active the one being downloaded.
-	queue  []pendingSong
-	active pendingSong
-	job    task
+	queue      []pendingSong
+	active     pendingSong
+	job        task
+	installing bool
 	// version counts the changes to the library, so the Downloads page
 	// knows when to read it again.
 	version int
@@ -63,22 +66,22 @@ func (a *app) openDownloads(dir string) {
 		d.locationErr = "Could not open the download folder: " + err.Error()
 		return
 	}
-	lib, err := offline.Open(context.Background(), dir)
+	lib, err := d.folder().Open(context.Background())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		d.locationErr = "Could not read the download library: " + err.Error()
 		return
 	}
 	d.lib = lib
-	d.available = true
+	d.available, d.loaded = true, true
 }
 
-func (d *downloads) writable() bool { return d.available && !d.move.busy() }
+func (d *downloads) writable() bool { return d.available && !d.move.busy() && !d.installing }
 
 // downloaded is the file of a downloaded track, or "".
 func (a *app) downloaded(videoID string) string {
 	d := &a.downloads
 	song, ok := d.lib.Song(videoID)
-	if !ok || !d.writable() {
+	if !ok || !d.available || d.move.busy() {
 		return ""
 	}
 	return filepath.Join(d.dir, song.File)
@@ -244,46 +247,65 @@ func (a *app) nextDownload() {
 	}
 	d.active = d.queue[0]
 	d.queue = slices.Delete(d.queue, 0, 1)
-	item, dir, streams := d.active.item, d.dir, a.streams
-	custom := d.custom()
+	item, folder, streams := d.active.item, d.folder(), a.streams
 	d.files.Add(1)
 	startTask(a, &d.job, downloadTimeout, func(ctx context.Context) (string, error) {
 		defer d.files.Add(-1)
-		if custom && !offline.Available(ctx, dir) {
-			return "", errDownloadFolderUnavailable
+		if folder.ID != "" && !folder.Available(ctx) {
+			return "", offline.ErrUnavailable
 		}
 		url, _, err := streams.Get(ctx, item.VideoID)
 		if err != nil {
 			return "", err
 		}
-		file, err := offline.Download(ctx, dir, item.VideoID, url)
+		file, err := folder.Download(ctx, item.VideoID, url)
 		if err != nil {
-			// A URL kept from earlier may have expired: the next try
-			// resolves the track again.
 			streams.Forget(item.VideoID)
-			if custom && ctx.Err() == nil && !offline.Available(ctx, dir) {
-				return "", errDownloadFolderUnavailable
-			}
 		}
-		return file, err
+		return file, downloadError(ctx, folder, err)
 	}, func(file string, err error) {
-		if errors.Is(err, errDownloadFolderUnavailable) {
-			d.queue = slices.Insert(d.queue, 0, d.active)
-			d.active = pendingSong{}
-			d.setAvailable(false)
+		if err != nil {
+			a.finishDownload(err)
 			return
 		}
-		single := d.active.single
-		d.active = pendingSong{}
-		if err != nil {
-			log.Printf("downloads: could not download video_id=%s: %v", item.VideoID, err)
-			a.notice = "Could not download “" + item.Title + "”"
-		} else {
-			d.lib.Add(offline.Song{Item: item, File: file, Single: single})
-			a.saveDownloads()
-		}
-		a.nextDownload()
+		lib := d.lib
+		lib.Add(offline.Song{Item: item, File: file, Single: d.active.single})
+		d.installing = true
+		startTask(a, &d.job, noTimeout, func(ctx context.Context) (struct{}, error) {
+			d.writer.Wait()
+			return struct{}{}, downloadError(ctx, folder, folder.Write(ctx, lib))
+		}, func(_ struct{}, err error) {
+			d.installing = false
+			if err == nil {
+				d.lib = lib
+				d.version++
+			}
+			a.finishDownload(err)
+		})
 	})
+}
+
+func downloadError(ctx context.Context, folder offline.Folder, err error) error {
+	if err != nil && folder.ID != "" && ctx.Err() == nil && !folder.Available(ctx) {
+		return offline.ErrUnavailable
+	}
+	return err
+}
+
+func (a *app) finishDownload(err error) {
+	d := &a.downloads
+	p := d.active
+	d.active = pendingSong{}
+	if errors.Is(err, offline.ErrUnavailable) && d.custom() {
+		d.queue = slices.Insert(d.queue, 0, p)
+		d.setAvailable(false)
+		return
+	}
+	if err != nil {
+		log.Printf("downloads: could not download video_id=%s: %v", p.item.VideoID, err)
+		a.notice = "Could not download “" + p.item.Title + "”"
+	}
+	a.nextDownload()
 }
 
 // removeDownload deletes a downloaded track, or stops it from being
@@ -353,17 +375,15 @@ func (a *app) collectionDownload(id string) (done, total int, saved, busy bool) 
 // thread.
 func (a *app) deleteDownloadFiles(files []string) {
 	d := &a.downloads
-	dir := d.dir
-	if len(files) == 0 || dir == "" {
+	folder := d.folder()
+	if len(files) == 0 || folder.Dir == "" {
 		return
 	}
 	d.files.Add(1)
 	a.run(func() {
 		defer d.files.Add(-1)
-		for _, file := range files {
-			if err := os.Remove(filepath.Join(dir, file)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				log.Printf("downloads: removing %s: %v", file, err)
-			}
+		if err := folder.Remove(context.Background(), files); err != nil {
+			log.Printf("downloads: removing files: %v", err)
 		}
 	})
 }
@@ -372,7 +392,7 @@ func (a *app) deleteDownloadFiles(files []string) {
 func (a *app) saveDownloads() {
 	d := &a.downloads
 	d.version++
-	d.writer.Save(d.dir, d.lib)
+	d.writer.Save(d.folder(), d.lib)
 }
 
 // offlinePage is the downloaded copy of an album or a playlist, for its page

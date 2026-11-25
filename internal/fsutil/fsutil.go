@@ -2,6 +2,7 @@
 package fsutil
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -45,6 +46,19 @@ func WriteFileAtomicInDir(path string, data []byte, perm os.FileMode) (err error
 		return err
 	}
 	return os.Rename(file.Name(), path)
+}
+
+// SyncDir makes changes to the directory's entries durable when supported.
+func SyncDir(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 // RemoveAll deletes a directory the app made, and says so when it cannot: a

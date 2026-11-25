@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "offline",
     srcs = [
+        "folder.go",
         "move.go",
         "offline.go",
     ],
@@ -11,7 +12,6 @@ go_library(
     deps = [
         "//internal/audio",
         "//internal/fsutil",
-        "//internal/proc",
         "//youtube",
     ],
 )

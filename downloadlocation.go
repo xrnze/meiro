@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -17,8 +19,6 @@ import (
 
 const downloadFolderUnavailable = "Download folder is unavailable. Reconnect the drive to use your downloads."
 
-var errDownloadFolderUnavailable = errors.New("download folder unavailable")
-
 // The location is committed independently of the debounced settings writer so
 // a failed preference write cannot leave the old library deleted.
 func (a *app) setupDownloadLocation(data string) {
@@ -26,18 +26,25 @@ func (a *app) setupDownloadLocation(data string) {
 	d.defaultDir = filepath.Join(data, "Downloads")
 	d.locationFile = filepath.Join(data, "download-location")
 	location, err := os.ReadFile(d.locationFile)
-	switch {
-	case errors.Is(err, os.ErrNotExist), err == nil && len(location) == 0:
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(location) == 0 {
 		a.openDownloads(d.defaultDir)
-	case err == nil && filepath.IsAbs(string(location)):
-		d.dir = filepath.Clean(string(location))
-	default:
+		return
+	}
+	var folder offline.Folder
+	if err == nil {
+		err = json.Unmarshal(location, &folder)
+	}
+	if err != nil || !filepath.IsAbs(folder.Dir) || folder.ID == "" {
 		d.locationErr = "Could not read the saved download location."
 		log.Printf("reading download location: %v", err)
+		return
 	}
+	d.dir, d.locationID = filepath.Clean(folder.Dir), folder.ID
 }
 
-func (d *downloads) custom() bool { return d.locationFile != "" && d.dir != d.defaultDir }
+func (d *downloads) custom() bool { return d.locationID != "" }
+
+func (d *downloads) folder() offline.Folder { return offline.Folder{Dir: d.dir, ID: d.locationID} }
 
 func (d *downloads) unavailableMessage() string {
 	if d.locationErr != "" {
@@ -58,7 +65,7 @@ func (a *app) checkDownloadFolder() {
 	if !d.custom() || d.dir == "" || d.move.busy() || d.probe.busy() {
 		return
 	}
-	dir, wasAvailable := d.dir, d.available
+	folder, wasAvailable := d.folder(), d.available
 	if !wasAvailable && (d.files.Load() != 0 || d.job.busy()) {
 		return
 	}
@@ -68,17 +75,23 @@ func (a *app) checkDownloadFolder() {
 	}
 	startTask(a, &d.probe, noTimeout, func(ctx context.Context) (availability, error) {
 		if wasAvailable {
-			return availability{open: offline.Available(ctx, dir)}, nil
+			return availability{open: folder.Available(ctx)}, nil
 		}
 		d.writer.Wait()
-		lib, err := offline.Open(ctx, dir)
+		lib, err := folder.Open(ctx)
 		return availability{lib: lib, open: err == nil}, err
 	}, func(result availability, _ error) {
 		if d.available != wasAvailable {
 			return
 		}
 		if result.open && !wasAvailable {
-			d.lib = result.lib
+			if d.loaded {
+				// The verified drive may have missed a pending index write.
+				d.writer.Save(folder, d.lib)
+			} else {
+				d.lib = result.lib
+				d.loaded = true
+			}
 		}
 		d.setAvailable(result.open)
 		a.nextDownload()
@@ -166,27 +179,42 @@ func (a *app) chooseDownloadFolder() {
 
 func (a *app) moveDownloadFolder(to string) {
 	d := &a.downloads
-	if to == d.dir || d.locationFile == "" || a.downloadFolderBlock() != "" {
+	if to == d.dir || d.locationFile == "" {
+		return
+	}
+	if block := a.downloadFolderBlock(); block != "" {
+		a.notice = "Download folder was not changed. " + block
 		return
 	}
 	d.probe.stop()
 	d.locationErr = ""
-	from, lib, file, custom := d.dir, d.lib, d.locationFile, d.custom()
-	location := to
-	if to == d.defaultDir {
-		location = ""
+	from, lib, file := d.folder(), d.lib, d.locationFile
+	target := offline.Folder{Dir: to}
+	if to != d.defaultDir {
+		target.ID = rand.Text()
 	}
-	startTask(a, &d.move, noTimeout, func(ctx context.Context) (struct{}, error) {
+	done := make(chan struct{})
+	d.moveDone = done
+	startTask(a, &d.move, noTimeout, func(ctx context.Context) (bool, error) {
+		defer close(done)
 		d.writer.Wait()
-		if custom && !offline.Available(ctx, from) {
-			return struct{}{}, errDownloadFolderUnavailable
-		}
-		err := offline.Move(ctx, from, to, lib, func() error {
-			return fsutil.WriteFileAtomicInDir(file, []byte(location), 0o600)
+		return offline.Move(ctx, from, target, lib, func() (bool, error) {
+			var data []byte
+			if target.ID != "" {
+				var err error
+				data, err = json.Marshal(target)
+				if err != nil {
+					return false, err
+				}
+			}
+			if err := fsutil.WriteFileAtomicInDir(file, data, 0o600); err != nil {
+				return false, err
+			}
+			return fsutil.SyncDir(ctx, filepath.Dir(file)) == nil, nil
 		})
-		return struct{}{}, err
-	}, func(_ struct{}, err error) {
-		if errors.Is(err, errDownloadFolderUnavailable) {
+	}, func(kept bool, err error) {
+		d.moveDone = nil
+		if errors.Is(err, offline.ErrUnavailable) && d.custom() {
 			d.setAvailable(false)
 			return
 		}
@@ -194,7 +222,10 @@ func (a *app) moveDownloadFolder(to string) {
 			d.locationErr = "Could not move downloads: " + err.Error()
 			return
 		}
-		d.dir = to
+		d.dir, d.locationID = to, target.ID
 		d.version++
+		if kept {
+			a.notice = "Downloads moved. Meiro kept the old copy because it could not confirm the move was safely written to disk."
+		}
 	})
 }

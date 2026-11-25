@@ -8,18 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
-	"github.com/elianiva/meiro/internal/audio"
-	"github.com/elianiva/meiro/internal/fsutil"
-	"github.com/elianiva/meiro/internal/proc"
 	"github.com/elianiva/meiro/youtube"
 )
 
@@ -55,83 +49,6 @@ type Collection struct {
 
 // ID is the browse ID of the collection's page.
 func (c Collection) ID() string { return c.Item.Target().ID }
-
-// Open reads and validates an existing library before cleaning up files
-// left behind by interrupted downloads.
-func Open(ctx context.Context, dir string) (Library, error) {
-	if err := ctx.Err(); err != nil {
-		return Library{}, err
-	}
-	path := filepath.Join(dir, indexName)
-	info, err := os.Lstat(path)
-	if err != nil {
-		return Library{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return Library{}, errors.New("download index is not a regular file")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Library{}, err
-	}
-	var lib Library
-	if err := json.Unmarshal(data, &lib); err != nil {
-		return Library{}, err
-	}
-	for _, song := range lib.Songs {
-		if !managedFile(song) {
-			return Library{}, fmt.Errorf("unexpected file name for %q", song.Item.Title)
-		}
-	}
-	proc.SweepStale(dir, nil, ".audio-")
-	lib.reindex()
-	lib.sweep(dir)
-	return lib, nil
-}
-
-// Available reports whether the download index is present at dir.
-func Available(ctx context.Context, dir string) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	info, err := os.Lstat(filepath.Join(dir, indexName))
-	return err == nil && info.Mode().IsRegular()
-}
-
-// sweep deletes the audio files in dir that the library does not list: the
-// files of downloads that were stopped as they finished.
-func (l *Library) sweep(dir string) {
-	listed := make(map[string]bool, len(l.Songs))
-	for _, song := range l.Songs {
-		listed[song.File] = true
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		key, _, _ := strings.Cut(name, ".")
-		if entry.IsDir() || listed[name] || len(key) != sha256.Size*2 {
-			continue
-		}
-		if _, err := hex.DecodeString(key); err != nil {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			log.Printf("removing unlisted download %s: %v", name, err)
-		}
-	}
-}
-
-// Write replaces the index of the downloads folder dir atomically.
-func Write(dir string, lib Library) error {
-	data, err := encode(lib)
-	if err != nil {
-		return err
-	}
-	return fsutil.WriteFileAtomicInDir(filepath.Join(dir, indexName), data, 0o600)
-}
 
 func encode(lib Library) ([]byte, error) {
 	if lib.Songs == nil {
@@ -263,21 +180,6 @@ func (l *Library) Tracks(c Collection) []youtube.MusicItem {
 	return items
 }
 
-// Download saves the audio at streamURL as the file of a track in the
-// downloads folder dir, and returns the file's name.
-func Download(ctx context.Context, dir, videoID, streamURL string) (string, error) {
-	temp, err := audio.Fetch(ctx, streamURL, dir)
-	if err != nil {
-		return "", err
-	}
-	defer fsutil.RemoveAll(filepath.Dir(temp))
-	name := audioKey(videoID) + filepath.Ext(temp)
-	if err := os.Rename(temp, filepath.Join(dir, name)); err != nil {
-		return "", err
-	}
-	return name, nil
-}
-
 func managedFile(song Song) bool {
 	name := song.File
 	return filepath.IsLocal(name) && filepath.Base(name) == name && strings.HasPrefix(name, audioKey(song.Item.VideoID)+".")
@@ -293,21 +195,21 @@ func audioKey(videoID string) string {
 // being written replaces what waits behind it. The zero value is ready to use.
 type Writer struct {
 	mu      sync.Mutex
-	dir     string
+	folder  Folder
 	next    Library
 	pending bool
 	running bool
 	done    chan struct{}
 }
 
-// Save writes lib to the downloads folder dir soon. The library must not be
-// changed in place afterwards: its methods replace the slices they change.
-func (w *Writer) Save(dir string, lib Library) {
-	if dir == "" {
+// Save writes lib to folder soon. The library must not be changed in place
+// afterwards: its methods replace the slices they change.
+func (w *Writer) Save(folder Folder, lib Library) {
+	if folder.Dir == "" {
 		return
 	}
 	w.mu.Lock()
-	w.dir, w.next, w.pending = dir, lib, true
+	w.folder, w.next, w.pending = folder, lib, true
 	if w.running {
 		w.mu.Unlock()
 		return
@@ -328,10 +230,10 @@ func (w *Writer) drain(done chan struct{}) {
 			w.mu.Unlock()
 			return
 		}
-		dir, lib := w.dir, w.next
+		folder, lib := w.folder, w.next
 		w.next, w.pending = Library{}, false
 		w.mu.Unlock()
-		if err := Write(dir, lib); err != nil {
+		if err := folder.Write(context.Background(), lib); err != nil {
 			log.Printf("saving downloads: %v", err)
 		}
 	}

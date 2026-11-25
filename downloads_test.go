@@ -51,7 +51,7 @@ func audioFiles(t *testing.T, dir string) []string {
 	}
 	var names []string
 	for _, entry := range entries {
-		if entry.Name() != "downloads.json" {
+		if filepath.Ext(entry.Name()) == ".wav" || filepath.Ext(entry.Name()) == ".webm" {
 			names = append(names, entry.Name())
 		}
 	}
@@ -89,8 +89,15 @@ func TestChangingDownloadFolderMovesTheOfflineLibrary(t *testing.T) {
 	mediaURL := downloadTone(t)
 	a, r := playbackApp(t)
 	data, selected := t.TempDir(), t.TempDir()
+	selected, err := filepath.EvalSymlinks(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
 	from, to := filepath.Join(data, "Downloads"), filepath.Join(selected, "Meiro Downloads")
 	a.setupDownloadLocation(data)
+	if err := os.WriteFile(filepath.Join(from, "notes.txt"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	a.downloads.pickFolder = func(string) (string, error) { return selected, nil }
 	r.url = func(string, int) (string, error) { return mediaURL, nil }
 	a.router.Push("/album/MPREb_test")
@@ -127,10 +134,26 @@ func TestChangingDownloadFolderMovesTheOfflineLibrary(t *testing.T) {
 	if !tt.HasText("Download folder is unavailable. Reconnect the drive to use your downloads.") {
 		t.Errorf("Downloads should explain why the folder is unavailable: %q", tt.Texts())
 	}
-	for _, dir := range []string{to, from} {
-		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("Meiro should not create a replacement folder at %q: %v", dir, err)
-		}
+	if _, err := os.Stat(to); !errors.Is(err, os.ErrNotExist) || len(audioFiles(t, from)) != 0 {
+		t.Errorf("Meiro should not create a replacement library: %v", err)
+	}
+	if err := os.Mkdir(to, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(to, "downloads.json")
+	if err := os.WriteFile(index, []byte(`{"songs":[],"collections":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.checkDownloadFolder()
+	tt.Frame()
+	if !tt.HasText("Download folder is unavailable. Reconnect the drive to use your downloads.") {
+		t.Errorf("a different library at the same path should not be accepted: %q", tt.Texts())
+	}
+	if err := os.Remove(index); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(to); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Rename(away, to); err != nil {
 		t.Fatal(err)
@@ -156,12 +179,18 @@ func TestChangingDownloadFolderMovesTheOfflineLibrary(t *testing.T) {
 	if !tt.HasText(from) || len(audioFiles(t, from)) != 1 || len(audioFiles(t, to)) != 0 {
 		t.Fatalf("reset did not move the offline library back: %q", tt.Texts())
 	}
+	if data, err := os.ReadFile(filepath.Join(from, "notes.txt")); err != nil || string(data) != "keep me" {
+		t.Errorf("reset changed an unrelated file: %q, %v", data, err)
+	}
 }
 
 func TestChangingDownloadFolderDoesNotStopStreaming(t *testing.T) {
 	a, r := tonesApp(t, 30)
 	a.setupDownloadLocation(t.TempDir())
-	selected := t.TempDir()
+	selected, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	a.downloads.pickFolder = func(string) (string, error) { return selected, nil }
 	a.router.Push("/album/MPREb_test")
 	tt := ui.NewTester(a.view, 1000, 900)

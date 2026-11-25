@@ -438,12 +438,13 @@ func audioCacheExtension(ext string) bool {
 // one. The URL itself is already signed, so no cookie is needed.
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
-// Fetch saves the audio stream at streamURL into a new temporary directory
-// inside dir, whose name starts with a dot, and returns the file's path. Only a
-// complete file is returned. The caller moves the file where it belongs and
-// removes the temporary directory.
-func Fetch(ctx context.Context, streamURL, dir string) (string, error) {
-	return downloadURL(ctx, http.DefaultClient, streamURL, dir)
+// Fetch writes a complete audio stream to out and returns its file extension.
+// On error the caller must discard any partial audio.
+func Fetch(ctx context.Context, streamURL string, out io.Writer) (string, error) {
+	if strings.TrimSpace(streamURL) == "" {
+		return "", errors.New("no resolved audio URL to download")
+	}
+	return fetchRanges(ctx, http.DefaultClient, streamURL, out)
 }
 
 // downloadURL saves an audio stream the app already resolved for
@@ -481,13 +482,24 @@ func downloadRanges(ctx context.Context, client *http.Client, streamURL, base st
 	if err != nil {
 		return "", fmt.Errorf("prepare audio cache: %w", err)
 	}
+	ext, err := fetchRanges(ctx, client, streamURL, file)
+	if err := errors.Join(err, file.Close()); err != nil {
+		return "", fmt.Errorf("download audio: %w", err)
+	}
+	path := base + ext
+	if err := os.Rename(base, path); err != nil {
+		return "", fmt.Errorf("prepare audio cache: %w", err)
+	}
+	return path, nil
+}
+
+func fetchRanges(ctx context.Context, client *http.Client, streamURL string, file io.Writer) (string, error) {
 	var written int64
 	total := int64(-1)
 	var contentType string
 	for total < 0 || written < total {
 		n, size, kind, err := appendRange(ctx, client, streamURL, written, file)
 		if err != nil {
-			_ = file.Close()
 			return "", err
 		}
 		if written == 0 {
@@ -495,14 +507,7 @@ func downloadRanges(ctx context.Context, client *http.Client, streamURL, base st
 		}
 		written, total = written+n, size
 	}
-	if err := file.Close(); err != nil {
-		return "", fmt.Errorf("download audio: %w", err)
-	}
-	path := base + audioURLExtension(contentType)
-	if err := os.Rename(base, path); err != nil {
-		return "", fmt.Errorf("prepare audio cache: %w", err)
-	}
-	return path, nil
+	return audioURLExtension(contentType), nil
 }
 
 // appendRange writes the bytes of streamURL from offset to file, at most

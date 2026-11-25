@@ -27,9 +27,9 @@ Preconditions:
 - Give `playbackApp(t)` a resolver URL served by `httptest`, so the download saves real bytes.
 - `TestADownloadedAlbumPlaysOffline` downloads the album, checks that the album page keeps its own content after a visit to Downloads, restarts the app on the same folder with every request failing, opens the album from Downloads, plays it without resolving, and removes the download.
 - `TestADownloadedPlaylistPicksUpASongAddedLater` downloads a playlist, adds a song to the fake's page, reopens the playlist from Downloads, and checks that the new song is fetched without fetching the old one again and that the offline page lists both.
-- `TestChangingDownloadFolderMovesTheOfflineLibrary` downloads an album, selects a folder through the Settings control with a fake system picker, restarts with the folder unavailable, then reconnects and plays the saved song offline. The test resets to the default after playback stops.
+- `TestChangingDownloadFolderMovesTheOfflineLibrary` downloads an album, selects a folder through the Settings control with a fake system picker, restarts with the folder unavailable, rejects another library at the same path, then reconnects and plays the saved song offline. The test resets to the default after playback stops without touching an unrelated file.
 - `offline.TestMovePublishesOnlyACompleteLibrary` covers the filesystem transaction and rejected moves.
-- `offline.TestRemovingACollectionKeepsSongsWantedElsewhere` and `offline.TestReadKeepsListedSongsAndSweepsUnlistedAudio` cover the index.
+- `offline.TestRemovingACollectionKeepsSongsWantedElsewhere` and `offline.TestOpenKeepsUnrelatedFilesAndSweepsTemps` cover the index.
 
 ## Gotchas
 

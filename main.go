@@ -279,6 +279,9 @@ func (a *app) shutdown() {
 	a.saver.Wait()
 	a.historyWriter.Wait()
 	a.downloads.move.stop()
+	if done := a.downloads.moveDone; done != nil {
+		<-done
+	}
 	a.downloads.probe.stop()
 	a.downloads.writer.Wait()
 	a.playSave.writer.Wait()

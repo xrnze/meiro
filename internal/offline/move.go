@@ -9,83 +9,110 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/elianiva/meiro/internal/fsutil"
 )
 
-// Move copies lib to a new folder and publishes it with commit. It retires
-// the source files only after commit has saved the new location.
-func Move(ctx context.Context, from, to string, lib Library, commit func() error) error {
-	resolved, err := filepath.EvalSymlinks(from)
+// Move copies lib to to, then calls commit to publish the new location.
+// kept is true if durability could not be confirmed and the source was kept.
+func Move(ctx context.Context, from, to Folder, lib Library, commit func() (bool, error)) (kept bool, err error) {
+	resolved, err := filepath.EvalSymlinks(from.Dir)
 	if err != nil {
-		return fmt.Errorf("open current download folder: %w", err)
+		return false, fmt.Errorf("open current download folder: %w", err)
 	}
-	parent, err := filepath.EvalSymlinks(filepath.Dir(to))
+	parent, err := filepath.EvalSymlinks(filepath.Dir(to.Dir))
 	if err != nil {
-		return fmt.Errorf("open destination parent folder: %w", err)
+		return false, fmt.Errorf("open destination parent folder: %w", err)
 	}
-	to = filepath.Join(parent, filepath.Base(to))
-	if rel, err := filepath.Rel(resolved, to); err == nil && filepath.IsLocal(rel) {
-		return errors.New("the destination is inside the current download folder")
+	to.Dir = filepath.Join(parent, filepath.Base(to.Dir))
+	if rel, err := filepath.Rel(resolved, to.Dir); err == nil && filepath.IsLocal(rel) {
+		return false, errors.New("the destination is inside the current download folder")
 	}
-	source, err := os.OpenRoot(resolved)
+	source, err := from.openRoot(ctx)
 	if err != nil {
-		return fmt.Errorf("open current download folder: %w", err)
+		return false, fmt.Errorf("open current download folder: %w", err)
 	}
 	defer source.Close()
-	if err := os.Mkdir(to, 0o700); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return errors.New("the destination already exists; choose a different folder")
+	mkdirErr := os.Mkdir(to.Dir, 0o700)
+	created := mkdirErr == nil
+	if !created && (!errors.Is(mkdirErr, os.ErrExist) || to.ID != "") {
+		if errors.Is(mkdirErr, os.ErrExist) {
+			return false, errors.New("the destination already exists; choose a different folder")
 		}
-		return fmt.Errorf("create destination folder: %w", err)
+		return false, fmt.Errorf("create destination folder: %w", mkdirErr)
 	}
-	target, err := os.OpenRoot(to)
+	target, err := os.OpenRoot(to.Dir)
 	if err != nil {
-		return fmt.Errorf("open destination folder: %w", err)
+		return false, fmt.Errorf("open destination folder: %w", err)
 	}
 	var copied []string
 	committed := false
 	defer func() {
 		if !committed {
-			retire(target, to, copied)
+			retire(target, to.Dir, copied, created)
+		} else {
+			_ = target.Close()
 		}
-		_ = target.Close()
 	}()
+	if !sameDirectory(target, to.Dir) {
+		return false, errors.New("the destination is not a regular directory")
+	}
+	if _, err := target.Lstat(indexName); !errors.Is(err, os.ErrNotExist) {
+		return false, errors.New("the destination already contains a download index")
+	}
 
 	for _, song := range lib.Songs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		name := song.File
 		if !managedFile(song) {
-			return fmt.Errorf("unexpected file name for %q", song.Item.Title)
+			return false, fmt.Errorf("unexpected file name for %q", song.Item.Title)
 		}
-		if err := copyTrack(source, target, name); err != nil {
-			return fmt.Errorf("copy download %q: %w", song.Item.Title, err)
+		if err := copyTrack(ctx, source, target, song.File); err != nil {
+			return false, fmt.Errorf("copy download %q: %w", song.Item.Title, err)
 		}
-		copied = append(copied, name)
+		copied = append(copied, song.File)
 	}
 	index, err := encode(lib)
 	if err != nil {
-		return fmt.Errorf("encode download index: %w", err)
+		return false, fmt.Errorf("encode download index: %w", err)
 	}
 	if err := writeCopy(target, indexName, bytes.NewReader(index), int64(len(index))); err != nil {
-		return fmt.Errorf("copy download index: %w", err)
+		return false, fmt.Errorf("copy download index: %w", err)
 	}
 	copied = append(copied, indexName)
+	retired := append([]string(nil), copied...)
+	if from.ID != "" {
+		retired = append(retired, identityName)
+	}
+	if to.ID != "" {
+		if err := writeCopy(target, identityName, strings.NewReader(to.ID), int64(len(to.ID))); err != nil {
+			return false, fmt.Errorf("identify download folder: %w", err)
+		}
+		copied = append(copied, identityName)
+	}
+	syncErr := errors.Join(syncRoot(target), fsutil.SyncDir(ctx, parent))
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !sameDirectory(target, to.Dir) {
+		return false, errors.New("the destination drive is no longer available")
+	}
+	durable, err := commit()
+	if err != nil {
+		return false, fmt.Errorf("save download folder: %w", err)
+	}
+	committed = true
+	if syncErr != nil || !durable {
+		log.Printf("moved downloads: keeping old copy because durability was not confirmed: %v", syncErr)
+		return true, nil
+	}
+	retire(source, resolved, retired, true)
+	return false, nil
+}
+
+func copyTrack(ctx context.Context, source, target *os.Root, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !sameDirectory(target, to) {
-		return errors.New("the destination drive is no longer available")
-	}
-	if err := commit(); err != nil {
-		return fmt.Errorf("save download folder: %w", err)
-	}
-	committed = true
-	retire(source, resolved, copied)
-	return nil
-}
-
-func copyTrack(source, target *os.Root, name string) error {
 	info, err := source.Lstat(name)
 	if err != nil {
 		return err
@@ -105,7 +132,19 @@ func copyTrack(source, target *os.Root, name string) error {
 	if !os.SameFile(info, actual) {
 		return errors.New("audio file changed while opening it")
 	}
-	return writeCopy(target, name, in, info.Size())
+	return writeCopy(target, name, checkedReader{ctx, in}, info.Size())
+}
+
+type checkedReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r checkedReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }
 
 func writeCopy(target *os.Root, name string, data io.Reader, size int64) (err error) {
@@ -129,6 +168,15 @@ func writeCopy(target *os.Root, name string, data io.Reader, size int64) (err er
 	return out.Sync()
 }
 
+func syncRoot(root *os.Root) error {
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
 func sameDirectory(root *os.Root, path string) bool {
 	opened, err := root.Stat(".")
 	if err != nil {
@@ -138,13 +186,18 @@ func sameDirectory(root *os.Root, path string) bool {
 	return err == nil && os.SameFile(opened, current)
 }
 
-func retire(root *os.Root, path string, names []string) {
+func retire(root *os.Root, path string, names []string, removeDir bool) {
 	for _, name := range names {
 		if err := root.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("cleaning up moved download %s: %v", name, err)
 		}
 	}
-	if sameDirectory(root, path) {
-		_ = os.Remove(path) // Only removes an empty directory.
+	opened, err := root.Stat(".")
+	_ = root.Close()
+	if removeDir && err == nil {
+		current, err := os.Lstat(path)
+		if err == nil && os.SameFile(opened, current) {
+			_ = os.Remove(path) // Only removes an empty directory.
+		}
 	}
 }

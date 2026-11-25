@@ -21,7 +21,7 @@ func playlist(id string, tracks ...string) Collection {
 }
 
 func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
-	for _, scenario := range []string{"success", "bad source", "missing file", "occupied destination", "failed location save"} {
+	for _, scenario := range []string{"success", "bad source", "missing file", "occupied destination", "failed location save", "durability unconfirmed"} {
 		t.Run(scenario, func(t *testing.T) {
 			from, to := t.TempDir(), filepath.Join(t.TempDir(), "Meiro Downloads")
 			track := song("move-me", true)
@@ -50,11 +50,12 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 				}
 				put(filepath.Join(to, "notes.txt"), "already there")
 			}
-			if err := Write(from, lib); err != nil {
+			if err := (Folder{Dir: from}).Write(t.Context(), lib); err != nil {
 				t.Fatal(err)
 			}
 			published := false
-			err := Move(t.Context(), from, to, lib, func() error {
+			target := Folder{Dir: to, ID: "test-destination"}
+			kept, err := Move(t.Context(), Folder{Dir: from}, target, lib, func() (bool, error) {
 				published = true
 				if _, err := os.Stat(filepath.Join(from, track.File)); err != nil {
 					t.Errorf("source disappeared before the location could be saved: %v", err)
@@ -62,7 +63,7 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 				if data, err := os.ReadFile(filepath.Join(to, track.File)); err != nil || string(data) != "track bytes" {
 					t.Errorf("destination did not contain the copied track: %q, %v", data, err)
 				}
-				got, err := Open(t.Context(), to)
+				got, err := target.Open(t.Context())
 				if err != nil {
 					t.Error(err)
 				}
@@ -70,18 +71,23 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 					t.Errorf("destination did not contain the playlist: %+v", collection)
 				}
 				if scenario == "failed location save" {
-					return errors.New("write refused")
+					return false, errors.New("write refused")
 				}
-				return nil
+				return scenario != "durability unconfirmed", nil
 			})
-			if (err == nil) != (scenario == "success") || published != (scenario == "success" || scenario == "failed location save") {
+			succeeded := scenario == "success" || scenario == "durability unconfirmed"
+			if (err == nil) != succeeded || published != (succeeded || scenario == "failed location save") {
 				t.Errorf("move returned %v, published=%t", err, published)
 			}
 			if data, err := os.ReadFile(filepath.Join(from, "notes.txt")); err != nil || string(data) != "not a download" {
 				t.Errorf("unrelated source file changed: %q, %v", data, err)
 			}
+			if scenario == "durability unconfirmed" && !kept {
+				t.Error("the move deleted its source without a durable location")
+			}
 			_, err = os.Stat(filepath.Join(from, track.File))
-			if scenario == "success" && !errors.Is(err, os.ErrNotExist) || scenario != "success" && err != nil {
+			retired := succeeded && !kept
+			if retired && !errors.Is(err, os.ErrNotExist) || !retired && err != nil {
 				t.Errorf("source track has incorrect state after move: %v", err)
 			}
 			switch scenario {
@@ -89,7 +95,14 @@ func TestMovePublishesOnlyACompleteLibrary(t *testing.T) {
 				if data, err := os.ReadFile(filepath.Join(to, "notes.txt")); err != nil || string(data) != "already there" {
 					t.Errorf("occupied destination changed: %q, %v", data, err)
 				}
-			case "success":
+			case "success", "durability unconfirmed":
+				wrong := Folder{Dir: to, ID: "another-library"}
+				if err := wrong.Write(t.Context(), Library{}); !errors.Is(err, ErrUnavailable) {
+					t.Errorf("opened another library for writing: %v", err)
+				}
+				if err := wrong.Remove(t.Context(), []string{track.File}); !errors.Is(err, ErrUnavailable) {
+					t.Errorf("removed files from another library: %v", err)
+				}
 			default:
 				if _, err := os.Stat(to); !errors.Is(err, os.ErrNotExist) {
 					t.Errorf("failed move left a destination: %v", err)
@@ -103,10 +116,11 @@ func TestOpenRejectsAnIndexThatReferencesUnmanagedFiles(t *testing.T) {
 	dir := t.TempDir()
 	var lib Library
 	lib.Add(Song{Item: youtube.MusicItem{VideoID: "one"}, File: "../notes.txt"})
-	if err := Write(dir, lib); err != nil {
+	folder := Folder{Dir: dir}
+	if err := folder.Write(t.Context(), lib); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(t.Context(), dir); err == nil {
+	if _, err := folder.Open(t.Context()); err == nil {
 		t.Error("opened a custom library that references a file outside it")
 	}
 }
@@ -135,14 +149,13 @@ func TestRemovingACollectionKeepsSongsWantedElsewhere(t *testing.T) {
 	}
 }
 
-// The library survives a restart, and files a stopped download left behind,
-// which it does not list, are deleted while everything else in the folder
-// stays.
-func TestReadKeepsListedSongsAndSweepsUnlistedAudio(t *testing.T) {
+// Reopening removes only temp files in Meiro's namespace, not other audio.
+func TestOpenKeepsUnrelatedFilesAndSweepsTemps(t *testing.T) {
 	dir := t.TempDir()
 	listed := fmt.Sprintf("%x.webm", sha256.Sum256([]byte("v1")))
 	unlisted := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.m4a"
-	for _, name := range []string{listed, unlisted, "notes.txt"} {
+	temp := ".meiro-audio-AAAAAAAAAAAAAAAAAAAAAAAAAA"
+	for _, name := range []string{listed, unlisted, temp, "notes.txt"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -150,11 +163,12 @@ func TestReadKeepsListedSongsAndSweepsUnlistedAudio(t *testing.T) {
 	var lib Library
 	lib.Add(Song{Item: youtube.MusicItem{VideoID: "v1", Title: "One"}, File: listed})
 	lib.AddCollection(playlist("VLPLa", "v1"))
-	if err := Write(dir, lib); err != nil {
+	folder := Folder{Dir: dir}
+	if err := folder.Write(t.Context(), lib); err != nil {
 		t.Fatal(err)
 	}
 
-	read, err := Open(t.Context(), dir)
+	read, err := folder.Open(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +178,7 @@ func TestReadKeepsListedSongsAndSweepsUnlistedAudio(t *testing.T) {
 	if c, ok := read.Collection("VLPLa"); !ok || !slices.Equal(c.Tracks, []string{"v1"}) {
 		t.Fatalf("playlist after reading = %+v, %v", c, ok)
 	}
-	for name, want := range map[string]bool{listed: true, unlisted: false, "notes.txt": true} {
+	for name, want := range map[string]bool{listed: true, unlisted: true, temp: false, "notes.txt": true} {
 		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
 			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
 		}
